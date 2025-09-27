@@ -6,7 +6,7 @@ use soroban_sdk::Env;
 #[test]
 fn test_increment() {
     let env = Env::default();
-    let contract_id = env.register_contract(None, SwapTradeContract);
+    let contract_id = env.register(SwapTradeContract, ());
     let client = SwapTradeContractClient::new(&env, &contract_id);
 
     assert_eq!(client.get_count(), 0);
@@ -21,7 +21,7 @@ fn test_increment() {
 #[test]
 fn test_init() {
     let env = Env::default();
-    let contract_id = env.register_contract(None, SwapTradeContract);
+    let contract_id = env.register(SwapTradeContract, ());
     let client = SwapTradeContractClient::new(&env, &contract_id);
 
     assert_eq!(client.init(), 0);
