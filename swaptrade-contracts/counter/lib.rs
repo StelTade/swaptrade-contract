@@ -38,4 +38,13 @@ impl CounterContract {
 
         portfolio.balance_of(&env, asset, user)
     }
+
+    /// Get balance for a given token and address
+    /// This is an alias for balance_of to match the requirements
+    pub fn get_balance(env: Env, token: Symbol, owner: Address) -> i128 {
+        Self::balance_of(env, token, owner)
+    }
 }
+
+#[cfg(test)]
+mod balance_test;
