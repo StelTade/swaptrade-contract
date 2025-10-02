@@ -3,6 +3,8 @@ use soroban_sdk::{contract, contractimpl, Address, Env, Symbol, Vec};
 mod portfolio;
 use portfolio::{Portfolio, Asset};
 pub use portfolio::Badge;
+mod trading;
+use trading::perform_swap;
 
 #[contract]
 pub struct CounterContract;
@@ -39,6 +41,29 @@ impl CounterContract {
         };
 
         portfolio.balance_of(&env, asset, user)
+    }
+
+    /// Swap tokens for a user using a simplified AMM (1:1 XLM <-> USDC-SIM)
+    /// - Validates input tokens
+    /// - Checks sufficient funds
+    /// - Debits from `from` and credits to `to`
+    /// - Records the trade
+    /// Returns amount received
+    pub fn swap(env: Env, from: Symbol, to: Symbol, amount: i128, user: Address) -> i128 {
+        let mut portfolio: Portfolio = env
+            .storage()
+            .instance()
+            .get()
+            .unwrap_or_else(Portfolio::new);
+
+        // perform swap (validates tokens and amount internally)
+        let out_amount = perform_swap(&env, &mut portfolio, from, to, amount, user.clone());
+
+        // record trade and persist state
+        portfolio.record_trade(&env, user);
+        env.storage().instance().set(&portfolio);
+
+        out_amount
     }
 
     /// Record a swap execution for a user
