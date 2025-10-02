@@ -2,6 +2,7 @@ use soroban_sdk::{contract, contractimpl, Address, Env, Symbol, Vec};
 
 mod portfolio;
 use portfolio::{Portfolio, Asset};
+pub use portfolio::Badge;
 
 #[contract]
 pub struct CounterContract;
@@ -53,27 +54,15 @@ impl CounterContract {
         env.storage().instance().set(&portfolio);
     }
 
-    /// Get portfolio stats for a user (trade count, pnl, balances)
-    pub fn get_portfolio(env: Env, user: Address) -> (u32, i128, Vec<(Symbol, i128)>) {
+    /// Get portfolio stats for a user (trade count, pnl)
+    pub fn get_portfolio(env: Env, user: Address) -> (u32, i128) {
         let portfolio: Portfolio = env
             .storage()
             .instance()
             .get()
             .unwrap_or_else(Portfolio::new);
 
-        let (trades, pnl, balances) = portfolio.get_portfolio(&env, user.clone());
-
-        // Convert Asset back into Symbol for easier querying
-        let mut out: Vec<(Symbol, i128)> = Vec::new(&env);
-        for (asset, bal) in balances.iter() {
-            let sym = match asset {
-                portfolio::Asset::XLM => Symbol::new(&env, "XLM"),
-                portfolio::Asset::Custom(s) => s,
-            };
-            out.push_back((sym, bal));
-        }
-
-        (trades, pnl, out)
+        portfolio.get_portfolio(&env, user)
     }
 
     /// Get balance for a given token and address
@@ -81,7 +70,32 @@ impl CounterContract {
     pub fn get_balance(env: Env, token: Symbol, owner: Address) -> i128 {
         Self::balance_of(env, token, owner)
     }
+
+    /// Check if a user has earned a specific badge
+    pub fn has_badge(env: Env, user: Address, badge: Badge) -> bool {
+        let portfolio: Portfolio = env
+            .storage()
+            .instance()
+            .get()
+            .unwrap_or_else(Portfolio::new);
+
+        portfolio.has_badge(&env, user, badge)
+    }
+
+    /// Get all badges earned by a user
+    pub fn get_user_badges(env: Env, user: Address) -> Vec<Badge> {
+        let portfolio: Portfolio = env
+            .storage()
+            .instance()
+            .get()
+            .unwrap_or_else(Portfolio::new);
+
+        portfolio.get_user_badges(&env, user)
+    }
 }
 
 #[cfg(test)]
 mod balance_test;
+
+#[cfg(test)]
+mod rewards_test;
