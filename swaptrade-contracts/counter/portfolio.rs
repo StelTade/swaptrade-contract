@@ -30,11 +30,37 @@ impl Portfolio {
             pnl: Map::new(),
             badges: Map::new(),
         }
+
+    /// Transfer a user's balance from one asset to another.
+    /// Fails if amount <= 0 or if the user has insufficient funds in the source asset.
+    pub fn transfer_asset(
+        &mut self,
+        env: &Env,
+        from_token: Asset,
+        to_token: Asset,
+        user: Address,
+        amount: i128,
+    ) {
+        assert!(amount > 0, "Amount must be positive");
+
+        // Debit from source asset
+        let from_key = (user.clone(), from_token);
+        let from_balance = self.balances.get(env, &from_key).unwrap_or(0);
+        assert!(from_balance >= amount, "Insufficient funds");
+        let new_from = from_balance - amount;
+        self.balances.set(env, &from_key, &new_from);
+
+        // Credit to destination asset
+        let to_key = (user.clone(), to_token);
+        let to_balance = self.balances.get(env, &to_key).unwrap_or(0);
+        let new_to = to_balance + amount;
+        self.balances.set(env, &to_key, &new_to);
     }
+
 
     /// Mint tokens (XLM or a custom token) to a user’s balance.
     pub fn mint(&mut self, env: &Env, token: Asset, to: Address, amount: i128) {
-        assert!(amount > 0, "Amount must be positive");
+        assert!(amount >= 0, "Amount must be non-negative");
 
         let key = (to.clone(), token.clone());
         let current = self.balances.get(env, &key).unwrap_or(0);
