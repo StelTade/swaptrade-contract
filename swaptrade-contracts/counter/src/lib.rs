@@ -7,6 +7,7 @@ mod trading { include!("../trading.rs"); }
 
 use portfolio::{Portfolio, Asset};
 pub use portfolio::Badge;
+pub use portfolio::Metrics;
 use trading::perform_swap;
 
 #[contract]
@@ -64,6 +65,62 @@ impl CounterContract {
         portfolio.record_trade(&env, user);
         env.storage().instance().set(&portfolio);
 
+        // Optional structured logging for successful swap
+        #[cfg(feature = "logging")]
+        {
+            use soroban_sdk::symbol_short;
+            env.events().publish(
+                (symbol_short!("swap")),
+                (amount, out_amount),
+            );
+        }
+
+        out_amount
+    }
+
+    /// Non-panicking swap that counts failed orders and returns 0 on failure
+    pub fn try_swap(env: Env, from: Symbol, to: Symbol, amount: i128, user: Address) -> i128 {
+        let mut portfolio: Portfolio = env
+            .storage()
+            .instance()
+            .get()
+            .unwrap_or_else(Portfolio::new);
+
+        let from_s = from.to_string();
+        let to_s = to.to_string();
+        let tokens_ok = (from_s == "XLM" || from_s == "USDC-SIM") && (to_s == "XLM" || to_s == "USDC-SIM");
+        let pair_ok = from != to;
+        let amount_ok = amount > 0;
+
+        if !(tokens_ok && pair_ok && amount_ok) {
+            // Count failed order
+            portfolio.inc_failed_order();
+            env.storage().instance().set(&portfolio);
+
+            #[cfg(feature = "logging")]
+            {
+                use soroban_sdk::symbol_short;
+                env.events().publish(
+                    (symbol_short!("swap_failed"), user.clone()),
+                    (from, to, amount),
+                );
+            }
+            return 0;
+        }
+
+        let out_amount = perform_swap(&env, &mut portfolio, from, to, amount, user.clone());
+        portfolio.record_trade(&env, user);
+        env.storage().instance().set(&portfolio);
+
+        #[cfg(feature = "logging")]
+        {
+            use soroban_sdk::symbol_short;
+            env.events().publish(
+                (symbol_short!("swap")),
+                (amount, out_amount),
+            );
+        }
+
         out_amount
     }
 
@@ -91,6 +148,17 @@ impl CounterContract {
         portfolio.get_portfolio(&env, user)
     }
 
+    /// Get aggregate metrics
+    pub fn get_metrics(env: Env) -> Metrics {
+        let portfolio: Portfolio = env
+            .storage()
+            .instance()
+            .get()
+            .unwrap_or_else(Portfolio::new);
+
+        portfolio.get_metrics()
+    }
+
     /// Check if a user has earned a specific badge
     pub fn has_badge(env: Env, user: Address, badge: Badge) -> bool {
         let portfolio: Portfolio = env
@@ -114,4 +182,5 @@ impl CounterContract {
     }
 }
 
-mod test;
+#[cfg(test)]
+mod balance_test;

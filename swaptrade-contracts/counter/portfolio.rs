@@ -20,6 +20,7 @@ pub struct Portfolio {
     trades: Map<Address, u32>,       // number of trades per user
     pnl: Map<Address, i128>,         // cumulative balance change placeholder
     badges: Map<(Address, Badge), bool>, // tracks which badges each user has earned
+    metrics: Metrics,                 // lightweight aggregate metrics
 }
 
 impl Portfolio {
@@ -29,6 +30,7 @@ impl Portfolio {
             trades: Map::new(),
             pnl: Map::new(),
             badges: Map::new(),
+            metrics: Metrics::default(),
         }
 
     /// Transfer a user's balance from one asset to another.
@@ -55,6 +57,19 @@ impl Portfolio {
         let to_balance = self.balances.get(env, &to_key).unwrap_or(0);
         let new_to = to_balance + amount;
         self.balances.set(env, &to_key, &new_to);
+
+        // Metrics: two balance updates (debit and credit)
+        self.metrics.balances_updated = self.metrics.balances_updated.saturating_add(2);
+
+        // Optional structured logging
+        #[cfg(feature = "logging")]
+        {
+            use soroban_sdk::symbol_short;
+            env.events().publish(
+                (symbol_short!("transfer_asset"), user.clone()),
+                (from_token, to_key.1, amount),
+            );
+        }
     }
 
 
@@ -71,6 +86,19 @@ impl Portfolio {
         // Update PnL placeholder
         let current_pnl = self.pnl.get(env, &to).unwrap_or(0);
         self.pnl.set(env, &to, &(current_pnl + amount));
+
+        // Metrics: one balance updated
+        self.metrics.balances_updated = self.metrics.balances_updated.saturating_add(1);
+
+        // Optional structured logging
+        #[cfg(feature = "logging")]
+        {
+            use soroban_sdk::symbol_short;
+            env.events().publish(
+                (symbol_short!("mint"), to.clone()),
+                (token, amount),
+            );
+        }
     }
 
     /// Record a swap execution (increase trade count).
@@ -78,6 +106,9 @@ impl Portfolio {
     pub fn record_trade(&mut self, env: &Env, user: Address) {
         let count = self.trades.get(env, &user).unwrap_or(0);
         self.trades.set(env, &user, &(count + 1));
+
+        // Metrics: successful trade executed
+        self.metrics.trades_executed = self.metrics.trades_executed.saturating_add(1);
 
         // Award "First Trade" badge if this is the first trade
         if count == 0 {
@@ -132,6 +163,24 @@ impl Portfolio {
         let pnl = self.pnl.get(env, &user).unwrap_or(0);
         (trades, pnl)
     }
+
+    /// Read aggregate metrics
+    pub fn get_metrics(&self) -> Metrics {
+        self.metrics.clone()
+    }
+
+    /// Increment failed order counter
+    pub fn inc_failed_order(&mut self) {
+        self.metrics.failed_orders = self.metrics.failed_orders.saturating_add(1);
+    }
+}
+
+#[derive(Clone, Default)]
+#[contracttype]
+pub struct Metrics {
+    pub trades_executed: u32,
+    pub failed_orders: u32,
+    pub balances_updated: u32,
 }
 
 
