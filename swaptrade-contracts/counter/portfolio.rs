@@ -30,6 +30,7 @@ impl Portfolio {
             pnl: Map::new(),
             badges: Map::new(),
         }
+    }
 
     /// Transfer a user's balance from one asset to another.
     /// Fails if amount <= 0 or if the user has insufficient funds in the source asset.
