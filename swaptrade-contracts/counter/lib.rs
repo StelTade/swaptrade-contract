@@ -15,29 +15,31 @@ impl CounterContract {
         let mut portfolio: Portfolio = env
             .storage()
             .instance()
-            .get()
+            .get(&())
             .unwrap_or_else(Portfolio::new);
 
-        let asset = match token.to_string().as_str() {
-            "XLM" => Asset::XLM,
-            _ => Asset::Custom(token.clone()),
+        let asset = if token == Symbol::short("XLM") {
+            Asset::XLM
+        } else {
+            Asset::Custom(token.clone())
         };
 
         portfolio.mint(&env, asset, to, amount);
 
-        env.storage().instance().set(&portfolio);
+        env.storage().instance().set(&(), &portfolio);
     }
 
     pub fn balance_of(env: Env, token: Symbol, user: Address) -> i128 {
         let portfolio: Portfolio = env
             .storage()
             .instance()
-            .get()
+            .get(&())
             .unwrap_or_else(Portfolio::new);
 
-        let asset = match token.to_string().as_str() {
-            "XLM" => Asset::XLM,
-            _ => Asset::Custom(token.clone()),
+        let asset = if token == Symbol::short("XLM") {
+            Asset::XLM
+        } else {
+            Asset::Custom(token.clone())
         };
 
         portfolio.balance_of(&env, asset, user)
@@ -53,7 +55,7 @@ impl CounterContract {
         let mut portfolio: Portfolio = env
             .storage()
             .instance()
-            .get()
+            .get(&())
             .unwrap_or_else(Portfolio::new);
 
         // perform swap (validates tokens and amount internally)
@@ -61,7 +63,7 @@ impl CounterContract {
 
         // record trade and persist state
         portfolio.record_trade(&env, user);
-        env.storage().instance().set(&portfolio);
+        env.storage().instance().set(&(), &portfolio);
 
         out_amount
     }
@@ -71,12 +73,12 @@ impl CounterContract {
         let mut portfolio: Portfolio = env
             .storage()
             .instance()
-            .get()
+            .get(&())
             .unwrap_or_else(Portfolio::new);
 
         portfolio.record_trade(&env, user);
 
-        env.storage().instance().set(&portfolio);
+        env.storage().instance().set(&(), &portfolio);
     }
 
     /// Get portfolio stats for a user (trade count, pnl)
@@ -84,7 +86,7 @@ impl CounterContract {
         let portfolio: Portfolio = env
             .storage()
             .instance()
-            .get()
+            .get(&())
             .unwrap_or_else(Portfolio::new);
 
         portfolio.get_portfolio(&env, user)
@@ -101,7 +103,7 @@ impl CounterContract {
         let portfolio: Portfolio = env
             .storage()
             .instance()
-            .get()
+            .get(&())
             .unwrap_or_else(Portfolio::new);
 
         portfolio.has_badge(&env, user, badge)
@@ -112,7 +114,7 @@ impl CounterContract {
         let portfolio: Portfolio = env
             .storage()
             .instance()
-            .get()
+            .get(&())
             .unwrap_or_else(Portfolio::new);
 
         portfolio.get_user_badges(&env, user)

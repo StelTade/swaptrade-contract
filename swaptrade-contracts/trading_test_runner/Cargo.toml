@@ -1,0 +1,16 @@
+[package]
+name = "trading_test_runner"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+
+[dev-dependencies]
+
+[profile.dev]
+opt-level = 0
+
+[profile.test]
+opt-level = 0
+
+[workspace]
