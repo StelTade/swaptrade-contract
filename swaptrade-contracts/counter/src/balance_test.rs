@@ -202,3 +202,56 @@ fn test_get_balance_persistence_across_calls() {
     assert_eq!(client.get_balance(&token, &user), 1000);
     assert_eq!(client.get_balance(&token, &user), 1000);
 }
+
+#[test]
+fn test_metrics_increment_on_mint_and_swap() {
+    let env = Env::default();
+    let contract_id = env.register(CounterContract, ());
+    let client = CounterContractClient::new(&env, &contract_id);
+
+    let user = Address::generate(&env);
+    let xlm = symbol_short!("XLM");
+    let usdc = symbol_short!("USDC-SIM");
+
+    // Mint and check balances
+    client.mint(&xlm, &user, &1000);
+    assert_eq!(client.get_balance(&xlm, &user), 1000);
+
+    // Swap XLM -> USDC-SIM
+    let out = client.swap(&xlm, &usdc, &500, &user);
+    assert_eq!(out, 500);
+
+    // Check metrics
+    let m = client.get_metrics();
+    assert_eq!(m.trades_executed, 1);
+    assert!(m.balances_updated >= 3); // 1 mint + 2 transfer updates
+}
+
+#[test]
+fn test_try_swap_counts_failed_orders_without_panic() {
+    let env = Env::default();
+    let contract_id = env.register(CounterContract, ());
+    let client = CounterContractClient::new(&env, &contract_id);
+
+    let user = Address::generate(&env);
+    let xlm = symbol_short!("XLM");
+    let usdc = symbol_short!("USDC-SIM");
+
+    // Fail: same token pair
+    let out_same = client.try_swap(&xlm, &xlm, &100, &user);
+    assert_eq!(out_same, 0);
+
+    // Fail: invalid token
+    let btc = symbol_short!("BTC");
+    let out_bad_token = client.try_swap(&xlm, &btc, &100, &user);
+    assert_eq!(out_bad_token, 0);
+
+    // Fail: negative amount
+    let out_neg = client.try_swap(&xlm, &usdc, &-10, &user);
+    assert_eq!(out_neg, 0);
+
+    // Metrics reflect failed orders
+    let m = client.get_metrics();
+    assert_eq!(m.failed_orders, 3);
+    assert_eq!(m.trades_executed, 0);
+}

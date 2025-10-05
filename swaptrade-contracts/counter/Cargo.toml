@@ -13,3 +13,8 @@ soroban-sdk = { workspace = true }
 
 [dev-dependencies]
 soroban-sdk = { workspace = true, features = ["testutils"] }
+
+[features]
+# Enable structured logging via Soroban events during tests and debug builds.
+# Off by default to avoid overhead in production.
+logging = []
