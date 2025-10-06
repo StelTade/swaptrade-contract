@@ -19,29 +19,31 @@ impl CounterContract {
         let mut portfolio: Portfolio = env
             .storage()
             .instance()
-            .get()
+            .get(&())
             .unwrap_or_else(Portfolio::new);
 
-        let asset = match token.to_string().as_str() {
-            "XLM" => Asset::XLM,
-            _ => Asset::Custom(token.clone()),
+        let asset = if token == Symbol::short("XLM") {
+            Asset::XLM
+        } else {
+            Asset::Custom(token.clone())
         };
 
         portfolio.mint(&env, asset, to, amount);
 
-        env.storage().instance().set(&portfolio);
+        env.storage().instance().set(&(), &portfolio);
     }
 
     pub fn balance_of(env: Env, token: Symbol, user: Address) -> i128 {
         let portfolio: Portfolio = env
             .storage()
             .instance()
-            .get()
+            .get(&())
             .unwrap_or_else(Portfolio::new);
 
-        let asset = match token.to_string().as_str() {
-            "XLM" => Asset::XLM,
-            _ => Asset::Custom(token.clone()),
+        let asset = if token == Symbol::short("XLM") {
+            Asset::XLM
+        } else {
+            Asset::Custom(token.clone())
         };
 
         portfolio.balance_of(&env, asset, user)
@@ -57,13 +59,13 @@ impl CounterContract {
         let mut portfolio: Portfolio = env
             .storage()
             .instance()
-            .get()
+            .get(&())
             .unwrap_or_else(Portfolio::new);
 
         let out_amount = perform_swap(&env, &mut portfolio, from, to, amount, user.clone());
 
         portfolio.record_trade(&env, user);
-        env.storage().instance().set(&portfolio);
+        env.storage().instance().set(&(), &portfolio);
 
         // Optional structured logging for successful swap
         #[cfg(feature = "logging")]
@@ -83,19 +85,18 @@ impl CounterContract {
         let mut portfolio: Portfolio = env
             .storage()
             .instance()
-            .get()
+            .get(&())
             .unwrap_or_else(Portfolio::new);
 
-        let from_s = from.to_string();
-        let to_s = to.to_string();
-        let tokens_ok = (from_s == "XLM" || from_s == "USDC-SIM") && (to_s == "XLM" || to_s == "USDC-SIM");
+        let tokens_ok = (from == Symbol::short("XLM") || from == Symbol::short("USDC-SIM"))
+            && (to == Symbol::short("XLM") || to == Symbol::short("USDC-SIM"));
         let pair_ok = from != to;
         let amount_ok = amount > 0;
 
         if !(tokens_ok && pair_ok && amount_ok) {
             // Count failed order
             portfolio.inc_failed_order();
-            env.storage().instance().set(&portfolio);
+            env.storage().instance().set(&(), &portfolio);
 
             #[cfg(feature = "logging")]
             {
@@ -108,9 +109,9 @@ impl CounterContract {
             return 0;
         }
 
-        let out_amount = perform_swap(&env, &mut portfolio, from, to, amount, user.clone());
-        portfolio.record_trade(&env, user);
-        env.storage().instance().set(&portfolio);
+    let out_amount = perform_swap(&env, &mut portfolio, from, to, amount, user.clone());
+    portfolio.record_trade(&env, user);
+    env.storage().instance().set(&(), &portfolio);
 
         #[cfg(feature = "logging")]
         {
@@ -129,12 +130,12 @@ impl CounterContract {
         let mut portfolio: Portfolio = env
             .storage()
             .instance()
-            .get()
+            .get(&())
             .unwrap_or_else(Portfolio::new);
 
         portfolio.record_trade(&env, user);
 
-        env.storage().instance().set(&portfolio);
+        env.storage().instance().set(&(), &portfolio);
     }
 
     /// Get portfolio stats for a user (trade count, pnl)
@@ -142,7 +143,7 @@ impl CounterContract {
         let portfolio: Portfolio = env
             .storage()
             .instance()
-            .get()
+            .get(&())
             .unwrap_or_else(Portfolio::new);
 
         portfolio.get_portfolio(&env, user)
@@ -153,7 +154,7 @@ impl CounterContract {
         let portfolio: Portfolio = env
             .storage()
             .instance()
-            .get()
+            .get(&())
             .unwrap_or_else(Portfolio::new);
 
         portfolio.get_metrics()
@@ -164,7 +165,7 @@ impl CounterContract {
         let portfolio: Portfolio = env
             .storage()
             .instance()
-            .get()
+            .get(&())
             .unwrap_or_else(Portfolio::new);
 
         portfolio.has_badge(&env, user, badge)
@@ -175,7 +176,7 @@ impl CounterContract {
         let portfolio: Portfolio = env
             .storage()
             .instance()
-            .get()
+            .get(&())
             .unwrap_or_else(Portfolio::new);
 
         portfolio.get_user_badges(&env, user)
@@ -184,3 +185,5 @@ impl CounterContract {
 
 #[cfg(test)]
 mod balance_test;
+
+// trading tests are provided as integration/unit tests in the repository tests/ folder

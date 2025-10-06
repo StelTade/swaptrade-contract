@@ -1,10 +1,7 @@
-pub fn swap(
-    balances: &mut HashMap<String, u64>,
-    #![cfg(test)]
-
+#[cfg(test)]
+mod tests {
     use std::collections::HashMap;
 
-    // Re-implement the small swap helper as a local pure-Rust function for fast tests.
     fn swap(
         balances: &mut HashMap<String, u64>,
         from: &str,
@@ -23,7 +20,6 @@ pub fn swap(
 
         if let Some(rate) = rates.get(&(from.to_string(), to.to_string())) {
             *from_balance -= amount;
-            // Simulate rounding/truncation that may occur in integer-based ledgers
             let converted = (amount as f64 * rate) as u64;
             *balances.get_mut(to).unwrap() += converted;
             Ok(())
@@ -78,17 +74,14 @@ pub fn swap(
         balances.insert("XLM".to_string(), 3u64);
         balances.insert("USDC".to_string(), 0u64);
 
-        // rate causes fractional converted amounts
         let mut rates = HashMap::new();
         rates.insert(("XLM".to_string(), "USDC".to_string()), 0.333333_f64);
 
-        // swap 1 XLM -> should convert to floor(1 * 0.333333) == 0 USDC
         let ok = swap(&mut balances, "XLM", "USDC", 1, &rates);
         assert!(ok.is_ok());
         assert_eq!(balances.get("XLM"), Some(&2u64));
         assert_eq!(balances.get("USDC"), Some(&0u64));
 
-        // swap remaining 2 XLM -> floor(2 * 0.333333) == 0 USDC, balances become 0 XLM
         swap(&mut balances, "XLM", "USDC", 2, &rates).unwrap();
         assert_eq!(balances.get("XLM"), Some(&0u64));
         assert_eq!(balances.get("USDC"), Some(&0u64));
@@ -96,7 +89,6 @@ pub fn swap(
 
     #[test]
     fn simulated_concurrent_order_isolation() {
-        // This simulates two users by keeping two separate balance maps and running swaps "concurrently" (sequentially in test)
         let mut alice = HashMap::new();
         alice.insert("XLM".to_string(), 500u64);
         alice.insert("USDC".to_string(), 0u64);
@@ -108,7 +100,6 @@ pub fn swap(
         let mut rates = HashMap::new();
         rates.insert(("XLM".to_string(), "USDC".to_string()), 1.0f64);
 
-        // Alice and Bob swap in quick succession
         swap(&mut alice, "XLM", "USDC", 200, &rates).unwrap();
         swap(&mut bob, "XLM", "USDC", 300, &rates).unwrap();
 
@@ -118,3 +109,24 @@ pub fn swap(
         assert_eq!(bob.get("XLM"), Some(&0u64));
         assert_eq!(bob.get("USDC"), Some(&300u64));
     }
+
+    #[test]
+    fn amm_round_trip_identity() {
+        let mut balances = HashMap::new();
+        balances.insert("XLM".to_string(), 1000u64);
+        balances.insert("USDC".to_string(), 0u64);
+
+        let mut rates = HashMap::new();
+        // 1:1 for the simple AMM
+        rates.insert(("XLM".to_string(), "USDC".to_string()), 1.0f64);
+        rates.insert(("USDC".to_string(), "XLM".to_string()), 1.0f64);
+
+        // XLM -> USDC
+        swap(&mut balances, "XLM", "USDC", 250, &rates).unwrap();
+        // USDC -> XLM
+        swap(&mut balances, "USDC", "XLM", 250, &rates).unwrap();
+
+        assert_eq!(balances.get("XLM"), Some(&1000u64));
+        assert_eq!(balances.get("USDC"), Some(&0u64));
+    }
+}
