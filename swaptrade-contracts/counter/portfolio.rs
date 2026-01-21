@@ -24,6 +24,15 @@ pub struct Portfolio {
     pnl: Map<Address, i128>,         // cumulative balance change placeholder
     badges: Map<(Address, Badge), bool>, // tracks which badges each user has earned
     metrics: Metrics,                 // lightweight aggregate metrics
+    
+    // Admin Dashboard Aggregate Stats
+    total_users: u32,                 // unique traders/LPs
+    total_trading_volume: i128,       // sum of all swap amounts
+    active_users: Vec<Address>,       // users with activity (limited to last N blocks)
+    top_traders: Vec<(Address, i128)>, // top 100 traders by PnL
+    xlm_in_pool: i128,               // liquidity pool XLM
+    usdc_in_pool: i128,              // liquidity pool USDC
+    total_fees_collected: i128,       // accumulated fees
 }
 
 impl Portfolio {
@@ -34,6 +43,13 @@ impl Portfolio {
             pnl: Map::new(env),
             badges: Map::new(env),
             metrics: Metrics::default(),
+            total_users: 0,
+            total_trading_volume: 0,
+            active_users: Vec::new(env),
+            top_traders: Vec::new(env),
+            xlm_in_pool: 0,
+            usdc_in_pool: 0,
+            total_fees_collected: 0,
         }
     }
 
@@ -65,6 +81,9 @@ impl Portfolio {
         // Metrics: two balance updates (debit and credit)
         self.metrics.balances_updated = self.metrics.balances_updated.saturating_add(2);
 
+        // Update trading volume stats
+        self.update_stats_on_trade(env, user.clone(), amount);
+
         // Optional structured logging
         #[cfg(feature = "logging")]
         {
@@ -89,7 +108,11 @@ impl Portfolio {
 
         // Update PnL placeholder
     let current_pnl = self.pnl.get(to.clone()).unwrap_or(0);
-    self.pnl.set(to, current_pnl + amount);
+    let new_pnl = current_pnl + amount;
+    self.pnl.set(to.clone(), new_pnl);
+
+        // Update top traders leaderboard
+        self.update_top_traders(env, to.clone());
 
         // Metrics: one balance updated
         self.metrics.balances_updated = self.metrics.balances_updated.saturating_add(1);
@@ -118,6 +141,13 @@ impl Portfolio {
         if count == 0 {
             self.award_badge(env, user, Badge::FirstTrade);
         }
+    }
+
+    /// Record a swap with amount tracking for volume statistics
+    /// Called when a swap is performed to update trading volume and stats
+    pub fn record_trade_with_amount(&mut self, env: &Env, user: Address, swap_amount: i128) {
+        self.record_trade(env, user.clone());
+        self.update_stats_on_trade(env, user, swap_amount);
     }
 
     /// Award a badge to a user if they don't already have it.
@@ -176,6 +206,147 @@ impl Portfolio {
     /// Increment failed order counter
     pub fn inc_failed_order(&mut self) {
         self.metrics.failed_orders = self.metrics.failed_orders.saturating_add(1);
+    }
+
+    // ===== ADMIN DASHBOARD QUERY FUNCTIONS =====
+
+    /// Get the total number of unique traders and LPs
+    /// Returns u32: unique traders + LPs count
+    /// Time complexity: O(1)
+    pub fn get_total_users(&self) -> u32 {
+        self.total_users
+    }
+
+    /// Get the total trading volume (sum of all swap amounts)
+    /// Returns i128: sum of all swap amounts
+    /// Time complexity: O(1)
+    pub fn get_total_trading_volume(&self) -> i128 {
+        self.total_trading_volume
+    }
+
+    /// Get the count of active users (users with recorded trades)
+    /// Returns u32: count of users in active_users list
+    /// Time complexity: O(1)
+    pub fn get_active_users_count(&self) -> u32 {
+        self.active_users.len()
+    }
+
+    /// Get the top N traders by PnL (leaderboard)
+    /// Capped at top 100 for safety
+    /// Returns Vec<(Address, i128)>: list of (user, pnl) pairs sorted by PnL descending
+    /// Time complexity: O(1) - precomputed top 100
+    pub fn get_top_traders(&self, limit: u32) -> Vec<(Address, i128)> {
+        let max_limit = 100u32;
+        let actual_limit = if limit > max_limit { max_limit } else { limit };
+        
+        let mut result = Vec::new_uninitialized(self.active_users.get_env());
+        let len = self.top_traders.len();
+        let cap = if len < actual_limit as usize { len } else { actual_limit as usize };
+        
+        for i in 0..cap {
+            if let Some(trader) = self.top_traders.get(i as u32) {
+                result.push_back(trader);
+            }
+        }
+        result
+    }
+
+    /// Get pool statistics (liquidity and fees)
+    /// Returns (i128, i128, i128): (xlm_in_pool, usdc_in_pool, total_fees_collected)
+    /// Time complexity: O(1)
+    pub fn get_pool_stats(&self) -> (i128, i128, i128) {
+        (self.xlm_in_pool, self.usdc_in_pool, self.total_fees_collected)
+    }
+
+    /// Helper: Update aggregate stats when a trade is recorded
+    /// Called lazily during trade operations
+    fn update_stats_on_trade(&mut self, env: &Env, user: Address, swap_amount: i128) {
+        // Check if user is new (not in trades map)
+        let trade_count = self.trades.get(user.clone()).unwrap_or(0);
+        if trade_count == 0 {
+            self.total_users = self.total_users.saturating_add(1);
+            
+            // Add to active_users if not already there
+            let mut is_active = false;
+            for i in 0..self.active_users.len() {
+                if let Some(addr) = self.active_users.get(i) {
+                    if addr == user {
+                        is_active = true;
+                        break;
+                    }
+                }
+            }
+            if !is_active {
+                self.active_users.push_back(user.clone());
+            }
+        }
+        
+        // Update total trading volume
+        self.total_trading_volume = self.total_trading_volume.saturating_add(swap_amount);
+    }
+
+    /// Helper: Update top traders leaderboard after PnL changes
+    /// Maintains top 100 traders sorted by PnL descending
+    fn update_top_traders(&mut self, env: &Env, user: Address) {
+        let user_pnl = self.pnl.get(user.clone()).unwrap_or(0);
+        
+        // Check if user is already in top_traders
+        let mut found_index = None;
+        for i in 0..self.top_traders.len() {
+            if let Some((addr, _)) = self.top_traders.get(i) {
+                if addr == user {
+                    found_index = Some(i);
+                    break;
+                }
+            }
+        }
+        
+        if let Some(idx) = found_index {
+            // Update existing entry
+            self.top_traders.set(idx, (user.clone(), user_pnl));
+        } else if self.top_traders.len() < 100 {
+            // Add new entry if under limit
+            self.top_traders.push_back((user.clone(), user_pnl));
+        } else {
+            // Check if new PnL beats the lowest in top 100
+            if let Some((_, lowest_pnl)) = self.top_traders.get(99) {
+                if user_pnl > lowest_pnl {
+                    self.top_traders.set(99, (user.clone(), user_pnl));
+                }
+            }
+        }
+        
+        // Sort by PnL descending (simple bubble sort for small list)
+        self.sort_top_traders();
+    }
+
+    /// Helper: Sort top_traders by PnL in descending order
+    fn sort_top_traders(&mut self) {
+        let len = self.top_traders.len();
+        for i in 0..len {
+            for j in 0..(len - 1 - i) {
+                if let (Some((_, pnl1)), Some((_, pnl2))) = (self.top_traders.get(j), self.top_traders.get(j + 1)) {
+                    if pnl1 < pnl2 {
+                        // Swap
+                        let temp1 = self.top_traders.get(j).unwrap();
+                        let temp2 = self.top_traders.get(j + 1).unwrap();
+                        self.top_traders.set(j, temp2);
+                        self.top_traders.set(j + 1, temp1);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Helper: Add liquidity to pool
+    pub fn add_pool_liquidity(&mut self, xlm_amount: i128, usdc_amount: i128) {
+        self.xlm_in_pool = self.xlm_in_pool.saturating_add(xlm_amount);
+        self.usdc_in_pool = self.usdc_in_pool.saturating_add(usdc_amount);
+    }
+
+    /// Helper: Collect fees
+    pub fn collect_fee(&mut self, fee_amount: i128) {
+        self.total_fees_collected = self.total_fees_collected.saturating_add(fee_amount);
     }
 }
 

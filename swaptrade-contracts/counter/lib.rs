@@ -119,6 +119,101 @@ impl CounterContract {
 
         portfolio.get_user_badges(&env, user)
     }
+
+    // ===== ADMIN DASHBOARD QUERY FUNCTIONS (Read-only) =====
+
+    /// Get the total number of unique traders and LPs on the platform
+    /// 
+    /// Returns: u32 representing the count of unique traders and liquidity providers
+    /// 
+    /// Time Complexity: O(1) - stored as aggregate statistic
+    /// 
+    /// Purpose: Provides educators and maintainers with overall platform user count
+    pub fn get_total_users(env: Env) -> u32 {
+        let portfolio: Portfolio = env
+            .storage()
+            .instance()
+            .get(&())
+            .unwrap_or_else(Portfolio::new);
+
+        portfolio.get_total_users()
+    }
+
+    /// Get the total trading volume across all users
+    /// 
+    /// Returns: i128 representing the sum of all swap amounts executed
+    /// 
+    /// Time Complexity: O(1) - stored as aggregate statistic
+    /// 
+    /// Purpose: Helps educators track ecosystem activity and trading momentum
+    pub fn get_total_trading_volume(env: Env) -> i128 {
+        let portfolio: Portfolio = env
+            .storage()
+            .instance()
+            .get(&())
+            .unwrap_or_else(Portfolio::new);
+
+        portfolio.get_total_trading_volume()
+    }
+
+    /// Get the count of active users (users with recorded trades)
+    /// 
+    /// Returns: u32 representing the number of users with at least one trade
+    /// 
+    /// Time Complexity: O(1) - length of active users vector
+    /// 
+    /// Purpose: Identifies engagement and helps spot inactive users
+    pub fn get_active_users_count(env: Env) -> u32 {
+        let portfolio: Portfolio = env
+            .storage()
+            .instance()
+            .get(&())
+            .unwrap_or_else(Portfolio::new);
+
+        portfolio.get_active_users_count()
+    }
+
+    /// Get the top N traders by PnL (leaderboard)
+    /// 
+    /// Arguments:
+    ///   limit: u32 - Maximum number of traders to return (capped at 100 for safety)
+    /// 
+    /// Returns: Vec<(Address, i128)> - List of (user_address, pnl) sorted by PnL descending
+    /// 
+    /// Time Complexity: O(1) - precomputed top 100 list, limited copy operation
+    /// 
+    /// Safety: Automatically capped at top 100 traders to prevent excessive data retrieval
+    /// 
+    /// Purpose: Enables leaderboards for educators and helps identify top performers
+    pub fn get_top_traders(env: Env, limit: u32) -> Vec<(Address, i128)> {
+        let portfolio: Portfolio = env
+            .storage()
+            .instance()
+            .get(&())
+            .unwrap_or_else(Portfolio::new);
+
+        portfolio.get_top_traders(limit)
+    }
+
+    /// Get pool statistics including liquidity and accumulated fees
+    /// 
+    /// Returns: (i128, i128, i128) tuple containing:
+    ///   - xlm_in_pool: XLM liquidity currently in the pool
+    ///   - usdc_in_pool: USDC liquidity currently in the pool
+    ///   - total_fees_collected: Cumulative fees collected by the platform
+    /// 
+    /// Time Complexity: O(1) - simple tuple return of stored values
+    /// 
+    /// Purpose: Provides operational visibility into pool health and fee accumulation
+    pub fn get_pool_stats(env: Env) -> (i128, i128, i128) {
+        let portfolio: Portfolio = env
+            .storage()
+            .instance()
+            .get(&())
+            .unwrap_or_else(Portfolio::new);
+
+        portfolio.get_pool_stats()
+    }
 }
 
 #[cfg(test)]
@@ -126,3 +221,6 @@ mod balance_test;
 
 #[cfg(test)]
 mod rewards_test;
+
+#[cfg(test)]
+mod dashboard_tests;
