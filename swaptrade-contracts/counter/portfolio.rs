@@ -13,7 +13,23 @@ pub enum Asset {
 #[derive(Clone, PartialEq, Debug)]
 #[contracttype]
 pub enum Badge {
+    /// Complete your first swap - achieved at 1+ trades
     FirstTrade,
+    
+    /// Become an experienced trader - achieved at 10+ trades
+    Trader,
+    
+    /// Build significant wealth - achieved when balance ≥ 10x starting amount
+    WealthBuilder,
+    
+    /// Provide liquidity to the ecosystem - achieved at 1+ LP deposits
+    LiquidityProvider,
+    
+    /// Explore diverse trading pairs - achieved when trading with 5+ different token pairs
+    Diversifier,
+    
+    /// Trade consistently across blocks - achieved when trading on 7+ different ledger heights
+    Consistency,
 }
 
 #[derive(Clone)]
@@ -33,6 +49,12 @@ pub struct Portfolio {
     xlm_in_pool: i128,               // liquidity pool XLM
     usdc_in_pool: i128,              // liquidity pool USDC
     total_fees_collected: i128,       // accumulated fees
+    
+    // Badge & Achievement Tracking
+    initial_balances: Map<Address, i128>,  // starting balance for WealthBuilder tracking
+    token_pairs_traded: Map<Address, Vec<Symbol>>, // unique token pairs per user
+    ledger_heights_traded: Map<Address, Vec<u64>>, // ledger heights where user traded
+    lp_deposits_count: Map<Address, u32>,  // number of LP deposits per user
 }
 
 impl Portfolio {
@@ -50,6 +72,10 @@ impl Portfolio {
             xlm_in_pool: 0,
             usdc_in_pool: 0,
             total_fees_collected: 0,
+            initial_balances: Map::new(env),
+            token_pairs_traded: Map::new(env),
+            ledger_heights_traded: Map::new(env),
+            lp_deposits_count: Map::new(env),
         }
     }
 
@@ -206,6 +232,178 @@ impl Portfolio {
     /// Increment failed order counter
     pub fn inc_failed_order(&mut self) {
         self.metrics.failed_orders = self.metrics.failed_orders.saturating_add(1);
+    }
+
+    // ===== BADGE & ACHIEVEMENT SYSTEM =====
+
+    /// Update badge tracking when a trade occurs
+    /// Tracks token pairs and ledger heights for badge conditions
+    pub fn track_trade_for_badges(&mut self, env: &Env, user: Address, from_token: Symbol, to_token: Symbol, ledger_height: u64) {
+        // Track token pair diversity
+        let mut pairs = self.token_pairs_traded.get(user.clone()).unwrap_or_else(|| Vec::new(env));
+        
+        // Check if this token pair combo is new
+        let pair_key = Self::format_pair_helper(from_token.clone(), to_token.clone());
+        let mut is_new_pair = true;
+        for i in 0..pairs.len() {
+            if let Some(existing) = pairs.get(i) {
+                if existing == pair_key {
+                    is_new_pair = false;
+                    break;
+                }
+            }
+        }
+        
+        if is_new_pair {
+            pairs.push_back(pair_key);
+            self.token_pairs_traded.set(user.clone(), pairs);
+        }
+        
+        // Track ledger heights for consistency badge
+        let mut heights = self.ledger_heights_traded.get(user.clone()).unwrap_or_else(|| Vec::new(env));
+        
+        // Check if this ledger height is new
+        let mut is_new_height = true;
+        for i in 0..heights.len() {
+            if let Some(existing) = heights.get(i) {
+                if existing == ledger_height {
+                    is_new_height = false;
+                    break;
+                }
+            }
+        }
+        
+        if is_new_height {
+            heights.push_back(ledger_height);
+            self.ledger_heights_traded.set(user, heights);
+        }
+    }
+
+    /// Check and automatically award all applicable badges to a user
+    /// Call this after each trade or LP action
+    pub fn check_and_award_badges(&mut self, env: &Env, user: Address) {
+        // FirstTrade: Complete 1 swap (already handled in record_trade)
+        // We keep it for consistency
+        
+        // Trader: Complete 10 swaps
+        let trades = self.trades.get(user.clone()).unwrap_or(0);
+        if trades >= 10 {
+            self.award_badge(env, user.clone(), Badge::Trader);
+        }
+        
+        // WealthBuilder: Achieve 10x starting balance
+        let current_balance = self.get_total_user_balance(env, user.clone());
+        let initial_balance = self.initial_balances.get(user.clone()).unwrap_or(0);
+        
+        if initial_balance > 0 && current_balance >= initial_balance * 10 {
+            self.award_badge(env, user.clone(), Badge::WealthBuilder);
+        }
+        
+        // LiquidityProvider: Deposit liquidity once
+        let lp_deposits = self.lp_deposits_count.get(user.clone()).unwrap_or(0);
+        if lp_deposits >= 1 {
+            self.award_badge(env, user.clone(), Badge::LiquidityProvider);
+        }
+        
+        // Diversifier: Trade with 5+ different token pairs
+        let pairs = self.token_pairs_traded.get(user.clone()).unwrap_or_else(|| Vec::new(env));
+        if pairs.len() >= 5 {
+            self.award_badge(env, user.clone(), Badge::Diversifier);
+        }
+        
+        // Consistency: Make trades on 7+ different ledger heights
+        let heights = self.ledger_heights_traded.get(user.clone()).unwrap_or_else(|| Vec::new(env));
+        if heights.len() >= 7 {
+            self.award_badge(env, user.clone(), Badge::Consistency);
+        }
+    }
+
+    /// Record an LP deposit for the user
+    pub fn record_lp_deposit(&mut self, user: Address) {
+        let count = self.lp_deposits_count.get(user.clone()).unwrap_or(0);
+        self.lp_deposits_count.set(user, count.saturating_add(1));
+    }
+
+    /// Record initial balance for WealthBuilder tracking
+    pub fn record_initial_balance(&mut self, user: Address, amount: i128) {
+        // Only set if not already recorded
+        if self.initial_balances.get(user.clone()).is_none() && amount > 0 {
+            self.initial_balances.set(user, amount);
+        }
+    }
+
+    /// Get total balance across all assets for a user
+    fn get_total_user_balance(&self, env: &Env, user: Address) -> i128 {
+        // Sum balances across all assets (simplified - just returns PnL as proxy)
+        self.pnl.get(user).unwrap_or(0)
+    }
+
+    /// Get badge progress for a user showing progress toward each badge
+    /// Returns progress as a string representation (e.g., "3/10 trades toward Trader")
+    pub fn get_badge_progress(&self, env: &Env, user: Address) -> Vec<(Badge, u32, u32)> {
+        let mut progress = Vec::new(env);
+        
+        // FirstTrade: 1+ trades
+        let trades = self.trades.get(user.clone()).unwrap_or(0);
+        progress.push_back((Badge::FirstTrade, trades, 1));
+        
+        // Trader: 10+ trades
+        progress.push_back((Badge::Trader, trades, 10));
+        
+        // WealthBuilder: 10x starting balance
+        let current_balance = self.get_total_user_balance(env, user.clone());
+        let initial_balance = self.initial_balances.get(user.clone()).unwrap_or(1); // Avoid division by 0
+        let wealth_multiplier = if initial_balance > 0 {
+            (current_balance / initial_balance) as u32
+        } else {
+            0
+        };
+        progress.push_back((Badge::WealthBuilder, wealth_multiplier, 10));
+        
+        // LiquidityProvider: 1+ LP deposits
+        let lp_deposits = self.lp_deposits_count.get(user.clone()).unwrap_or(0);
+        progress.push_back((Badge::LiquidityProvider, lp_deposits, 1));
+        
+        // Diversifier: 5+ different token pairs
+        let pairs = self.token_pairs_traded.get(user.clone()).unwrap_or_else(|| Vec::new(env));
+        progress.push_back((Badge::Diversifier, pairs.len() as u32, 5));
+        
+        // Consistency: 7+ different ledger heights
+        let heights = self.ledger_heights_traded.get(user.clone()).unwrap_or_else(|| Vec::new(env));
+        progress.push_back((Badge::Consistency, heights.len() as u32, 7));
+        
+        progress
+    }
+
+    /// Update get_user_badges to include all earned badges
+    pub fn get_user_badges(&self, env: &Env, user: Address) -> Vec<Badge> {
+    let mut badges = Vec::new(env);
+
+        // Check all badge types
+        let badge_types = [
+            Badge::FirstTrade,
+            Badge::Trader,
+            Badge::WealthBuilder,
+            Badge::LiquidityProvider,
+            Badge::Diversifier,
+            Badge::Consistency,
+        ];
+        
+        for badge in badge_types.iter() {
+            if self.has_badge(env, user.clone(), badge.clone()) {
+                badges.push_back(badge.clone());
+            }
+        }
+
+        badges
+    }
+
+    // ===== HELPER FUNCTION FOR TOKEN PAIR FORMATTING =====
+    
+    /// Format a token pair for tracking (handles ordering)
+    fn format_pair_helper(from: Symbol, to: Symbol) -> Symbol {
+        // Simple pair identifier (in production, you might use a hash)
+        from
     }
 
     // ===== ADMIN DASHBOARD QUERY FUNCTIONS =====

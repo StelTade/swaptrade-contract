@@ -224,3 +224,6 @@ mod rewards_test;
 
 #[cfg(test)]
 mod dashboard_tests;
+
+#[cfg(test)]
+mod achievements_tests;
