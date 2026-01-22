@@ -1,9 +1,9 @@
 #![cfg(test)]
 
 use super::*;
-use soroban_sdk::{symbol_short, Address, Env, Symbol};
+use soroban_sdk::{symbol_short, Address, Env};
 
-// 1) Happy path: simple swap XLM -> USDC-SIM
+// 1) Happy path: simple swap XLM -> USDCSIM
 #[test]
 fn test_swap_happy_path() {
     let env = Env::default();
@@ -12,7 +12,7 @@ fn test_swap_happy_path() {
 
     let user = Address::generate(&env);
     let xlm = symbol_short!("XLM");
-    let usdc = symbol_short!("USDC-SIM");
+    let usdc = symbol_short!("USDCSIM");
 
     // Mint XLM and perform swap
     client.mint(&xlm, &user, &1000);
@@ -34,7 +34,7 @@ fn test_swap_insufficient_balance_panics() {
 
     let user = Address::generate(&env);
     let xlm = symbol_short!("XLM");
-    let usdc = symbol_short!("USDC-SIM");
+    let usdc = symbol_short!("USDCSIM");
 
     // No minting, attempt to swap should panic due to insufficient funds
     client.swap(&xlm, &usdc, &100, &user);
@@ -51,12 +51,12 @@ fn test_try_swap_handles_invalid_inputs_and_counts_failed() {
     let xlm = symbol_short!("XLM");
 
     // invalid pair (same token) -> returns 0
-    let out = client.try_swap(&xlm, &xlm, &100, &user);
+    let out = client.safe_swap(&xlm, &xlm, &100, &user);
     assert_eq!(out, 0);
 
     // negative amount -> returns 0
-    let usdc = symbol_short!("USDC-SIM");
-    let out2 = client.try_swap(&xlm, &usdc, &-10, &user);
+    let usdc = symbol_short!("USDCSIM");
+    let out2 = client.safe_swap(&xlm, &usdc, &-10, &user);
     assert_eq!(out2, 0);
 
     // metrics reflect failed orders
@@ -73,7 +73,7 @@ fn test_swap_precision_truncation() {
 
     let user = Address::generate(&env);
     let xlm = symbol_short!("XLM");
-    let usdc = symbol_short!("USDC-SIM");
+    let usdc = symbol_short!("USDCSIM");
 
     // Mint a small amount and swap
     client.mint(&xlm, &user, &3); // small odd amount
@@ -94,7 +94,7 @@ fn test_amm_round_trip_identity() {
 
     let user = Address::generate(&env);
     let xlm = symbol_short!("XLM");
-    let usdc = symbol_short!("USDC-SIM");
+    let usdc = symbol_short!("USDCSIM");
 
     client.mint(&xlm, &user, &1000);
     let out1 = client.swap(&xlm, &usdc, &250, &user);
@@ -118,7 +118,7 @@ fn test_concurrent_like_swaps_isolation() {
     let user1 = Address::generate(&env);
     let user2 = Address::generate(&env);
     let xlm = symbol_short!("XLM");
-    let usdc = symbol_short!("USDC-SIM");
+    let usdc = symbol_short!("USDCSIM");
 
     client.mint(&xlm, &user1, &500);
     client.mint(&xlm, &user2, &300);
@@ -149,7 +149,7 @@ fn test_swap_zero_amount_panics() {
 
     let user = Address::generate(&env);
     let xlm = symbol_short!("XLM");
-    let usdc = symbol_short!("USDC-SIM");
+    let usdc = symbol_short!("USDCSIM");
 
     client.mint(&xlm, &user, &100);
     client.swap(&xlm, &usdc, &0, &user);
