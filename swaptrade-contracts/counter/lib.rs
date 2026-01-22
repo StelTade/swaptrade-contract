@@ -64,7 +64,7 @@ impl CounterContract {
         let out_amount = perform_swap(&env, &mut portfolio, from, to, amount, user.clone());
 
         // record trade and persist state
-        portfolio.record_trade(&env, user);
+        portfolio.record_trade_with_amount(&env, user, amount);
         env.storage().instance().set(&(), &portfolio);
 
         out_amount
