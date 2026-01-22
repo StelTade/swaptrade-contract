@@ -4,11 +4,14 @@ use soroban_sdk::{contract, contractimpl, Address, Env, Symbol, Vec};
 // Bring in modules from parent directory
 mod portfolio { include!("../portfolio.rs"); }
 mod trading { include!("../trading.rs"); }
+mod batch { include!("../batch.rs"); }
 
 use portfolio::{Portfolio, Asset};
 pub use portfolio::Badge;
 pub use portfolio::Metrics;
 use trading::perform_swap;
+use batch::{BatchOperation, BatchResult, OperationResult, execute_batch_atomic, execute_batch_best_effort};
+pub use batch::{BatchOperation as BatchOp, BatchResult as BatchRes, OperationResult as OpResult};
 
 #[contract]
 pub struct CounterContract;
@@ -181,9 +184,73 @@ impl CounterContract {
 
         portfolio.get_user_badges(&env, user)
     }
+
+    // ===== BATCH OPERATIONS =====
+
+    /// Execute a batch of operations atomically (all-or-nothing)
+    /// All operations succeed or all are rolled back on any failure
+    pub fn execute_batch_atomic(env: Env, operations: Vec<BatchOperation>) -> BatchResult {
+        let mut portfolio: Portfolio = env
+            .storage()
+            .instance()
+            .get(&())
+            .unwrap_or_else(Portfolio::new);
+
+        let result = execute_batch_atomic(&env, &mut portfolio, operations);
+
+        match result {
+            Ok(batch_result) => {
+                // Only save if all operations succeeded
+                env.storage().instance().set(&(), &portfolio);
+                batch_result
+            }
+            Err(_) => {
+                // Don't save portfolio on failure (already rolled back)
+                // Return empty result with error
+                let mut error_result = BatchResult::new(&env);
+                error_result.operations_failed = 1;
+                error_result
+            }
+        }
+    }
+
+    /// Execute a batch of operations with best-effort (continue on failure)
+    /// Operations are executed sequentially, failures don't affect successful operations
+    pub fn execute_batch_best_effort(env: Env, operations: Vec<BatchOperation>) -> BatchResult {
+        let mut portfolio: Portfolio = env
+            .storage()
+            .instance()
+            .get(&())
+            .unwrap_or_else(Portfolio::new);
+
+        let result = execute_batch_best_effort(&env, &mut portfolio, operations);
+
+        match result {
+            Ok(batch_result) => {
+                // Save portfolio with successful operations applied
+                env.storage().instance().set(&(), &portfolio);
+                batch_result
+            }
+            Err(_) => {
+                // Return empty result on validation error
+                let mut error_result = BatchResult::new(&env);
+                error_result.operations_failed = 1;
+                error_result
+            }
+        }
+    }
+
+    /// Execute a batch of operations (defaults to atomic mode)
+    /// This is a convenience method for backwards compatibility
+    pub fn execute_batch(env: Env, operations: Vec<BatchOperation>) -> BatchResult {
+        Self::execute_batch_atomic(env, operations)
+    }
 }
 
 #[cfg(test)]
 mod balance_test;
+
+#[cfg(test)]
+mod batch_tests;
 
 // trading tests are provided as integration/unit tests in the repository tests/ folder
