@@ -4,12 +4,15 @@ use soroban_sdk::{contract, contractimpl, Address, Env, Symbol, Vec, symbol_shor
 // Bring in modules from parent directory
 mod portfolio { include!("../portfolio.rs"); }
 mod trading { include!("../trading.rs"); }
+mod tiers { include!("../tiers.rs"); }
 pub mod oracle;
 
 use portfolio::{Portfolio, Asset};
 pub use portfolio::Badge;
 pub use portfolio::Metrics;
+pub use tiers::UserTier;
 use trading::perform_swap;
+use tiers::calculate_user_tier;
 use oracle::{set_stored_price, get_price_safe};
 
 #[contract]
@@ -90,6 +93,7 @@ impl CounterContract {
     }
 
     /// Swap tokens using simplified AMM (1:1 XLM <-> USDCSIM)
+    /// Applies tier-based fee discounts
     pub fn swap(env: Env, from: Symbol, to: Symbol, amount: i128, user: Address) -> i128 {
         let mut portfolio: Portfolio = env
             .storage()
@@ -97,9 +101,27 @@ impl CounterContract {
             .get(&())
             .unwrap_or_else(|| Portfolio::new(&env));
 
-        let out_amount = perform_swap(&env, &mut portfolio, from, to, amount, user.clone());
+        // Get user's current tier for fee calculation
+        let user_tier = portfolio.get_user_tier(&env, user.clone());
+        let fee_bps = user_tier.effective_fee_bps();
 
-        portfolio.record_trade(&env, user);
+        // Calculate fee amount (fee is collected on input amount)
+        let fee_amount = (amount * fee_bps as i128) / 10000;
+        let swap_amount = amount - fee_amount;
+
+        // Collect the fee
+        if fee_amount > 0 {
+            portfolio.collect_fee(fee_amount);
+        }
+
+        let out_amount = perform_swap(&env, &mut portfolio, from, to, swap_amount, user.clone());
+
+        // Record trade with full amount (for volume tracking)
+        portfolio.record_trade_with_amount(&env, user.clone(), amount);
+
+        // Update user's tier after trade
+        let (new_tier, tier_changed) = portfolio.update_tier(&env, user.clone());
+
         env.storage().instance().set(&(), &portfolio);
 
         // Optional structured logging for successful swap
@@ -108,7 +130,7 @@ impl CounterContract {
             use soroban_sdk::symbol_short;
             env.events().publish(
                 (symbol_short!("swap")),
-                (amount, out_amount),
+                (amount, out_amount, fee_amount, user_tier),
             );
         }
 
@@ -116,6 +138,7 @@ impl CounterContract {
     }
 
     /// Non-panicking swap that counts failed orders and returns 0 on failure
+    /// Applies tier-based fee discounts
     pub fn safe_swap(env: Env, from: Symbol, to: Symbol, amount: i128, user: Address) -> i128 {
         let mut portfolio: Portfolio = env
             .storage()
@@ -144,16 +167,33 @@ impl CounterContract {
             return 0;
         }
 
-    let out_amount = perform_swap(&env, &mut portfolio, from, to, amount, user.clone());
-    portfolio.record_trade(&env, user);
-    env.storage().instance().set(&(), &portfolio);
+        // Get user's current tier for fee calculation
+        let user_tier = portfolio.get_user_tier(&env, user.clone());
+        let fee_bps = user_tier.effective_fee_bps();
+
+        // Calculate fee amount (fee is collected on input amount)
+        let fee_amount = (amount * fee_bps as i128) / 10000;
+        let swap_amount = amount - fee_amount;
+
+        // Collect the fee
+        if fee_amount > 0 {
+            portfolio.collect_fee(fee_amount);
+        }
+
+        let out_amount = perform_swap(&env, &mut portfolio, from, to, swap_amount, user.clone());
+        portfolio.record_trade_with_amount(&env, user.clone(), amount);
+
+        // Update user's tier after trade
+        let (new_tier, tier_changed) = portfolio.update_tier(&env, user.clone());
+
+        env.storage().instance().set(&(), &portfolio);
 
         #[cfg(feature = "logging")]
         {
             use soroban_sdk::symbol_short;
             env.events().publish(
                 (symbol_short!("swap")),
-                (amount, out_amount),
+                (amount, out_amount, fee_amount, user_tier),
             );
         }
 
@@ -215,6 +255,17 @@ impl CounterContract {
             .unwrap_or_else(|| Portfolio::new(&env));
 
         portfolio.get_user_badges(&env, user)
+    }
+
+    /// Get the current tier for a user
+    pub fn get_user_tier(env: Env, user: Address) -> UserTier {
+        let portfolio: Portfolio = env
+            .storage()
+            .instance()
+            .get(&())
+            .unwrap_or_else(|| Portfolio::new(&env));
+
+        portfolio.get_user_tier(&env, user)
     }
 }
 

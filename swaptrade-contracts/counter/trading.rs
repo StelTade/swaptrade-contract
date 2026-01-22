@@ -105,7 +105,7 @@ pub fn perform_swap(
     let out_amount = actual_out as i128;
 
     // 4. Update Portfolio (User Balances)
-    portfolio.transfer_asset(env, from_asset.clone(), to_asset.clone(), user, amount);
+    portfolio.transfer_asset(env, from_asset.clone(), to_asset.clone(), user.clone(), amount);
     
     // 5. Update Pool Liquidity (Virtual)
     // Only update if liquidity was set (simulated)
