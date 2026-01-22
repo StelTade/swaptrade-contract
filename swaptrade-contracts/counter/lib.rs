@@ -5,6 +5,8 @@ use portfolio::{Portfolio, Asset};
 pub use portfolio::Badge;
 mod trading;
 use trading::perform_swap;
+mod referral;
+use referral::ReferralSystem;
 
 #[contract]
 pub struct CounterContract;
@@ -214,6 +216,88 @@ impl CounterContract {
 
         portfolio.get_pool_stats()
     }
+
+    // ===== REFERRAL SYSTEM FUNCTIONS =====
+    
+    /// Generate a unique referral code for a user
+    pub fn generate_referral_code(env: Env, user: Address) -> Symbol {
+        let mut referral_system: ReferralSystem = env
+            .storage()
+            .instance()
+            .get(&Symbol::new(&env, "referral_system"))
+            .unwrap_or_else(|| ReferralSystem::new(&env));
+
+        let code = referral_system.generate_referral_code(&env, user);
+        
+        env.storage().instance().set(&Symbol::new(&env, "referral_system"), &referral_system);
+        
+        code
+    }
+
+    /// Register a new user with a referral code
+    pub fn register_with_referral(env: Env, referral_code: Symbol, new_user: Address) -> Result<(), &'static str> {
+        let mut referral_system: ReferralSystem = env
+            .storage()
+            .instance()
+            .get(&Symbol::new(&env, "referral_system"))
+            .unwrap_or_else(|| ReferralSystem::new(&env));
+
+        let result = referral_system.register_with_referral(&env, referral_code, new_user);
+        
+        if result.is_ok() {
+            env.storage().instance().set(&Symbol::new(&env, "referral_system"), &referral_system);
+        }
+        
+        result
+    }
+
+    /// Get referral code for a user
+    pub fn get_referral_code(env: Env, user: Address) -> Symbol {
+        let referral_system: ReferralSystem = env
+            .storage()
+            .instance()
+            .get(&Symbol::new(&env, "referral_system"))
+            .unwrap_or_else(|| ReferralSystem::new(&env));
+
+        referral_system.get_referral_code(&env, user)
+    }
+
+    /// Get list of referrals for a user
+    pub fn get_referrals(env: Env, user: Address) -> Vec<Address> {
+        let referral_system: ReferralSystem = env
+            .storage()
+            .instance()
+            .get(&Symbol::new(&env, "referral_system"))
+            .unwrap_or_else(|| ReferralSystem::new(&env));
+
+        referral_system.get_referrals(&env, user)
+    }
+
+    /// Get referral rewards for a user
+    pub fn get_referral_rewards(env: Env, user: Address) -> i128 {
+        let referral_system: ReferralSystem = env
+            .storage()
+            .instance()
+            .get(&Symbol::new(&env, "referral_system"))
+            .unwrap_or_else(|| ReferralSystem::new(&env));
+
+        referral_system.get_referral_rewards(&env, user)
+    }
+
+    /// Claim referral rewards for a user
+    pub fn claim_referral_rewards(env: Env, user: Address) -> i128 {
+        let mut referral_system: ReferralSystem = env
+            .storage()
+            .instance()
+            .get(&Symbol::new(&env, "referral_system"))
+            .unwrap_or_else(|| ReferralSystem::new(&env));
+
+        let rewards = referral_system.claim_referral_rewards(&env, user);
+        
+        env.storage().instance().set(&Symbol::new(&env, "referral_system"), &referral_system);
+        
+        rewards
+    }
 }
 
 #[cfg(test)]
@@ -227,3 +311,9 @@ mod dashboard_tests;
 
 #[cfg(test)]
 mod achievements_tests;
+
+#[cfg(test)]
+mod referral_tests;
+
+#[cfg(test)]
+mod trading_tests;
