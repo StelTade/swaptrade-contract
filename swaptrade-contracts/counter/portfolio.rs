@@ -1,5 +1,9 @@
 use soroban_sdk::{contracttype, Address, Env, Symbol, Map, Vec};
 
+#[cfg(test)]
+use soroban_sdk::testutils::Address as _;
+
+
 #[derive(Clone)]
 #[contracttype]
 pub enum Asset {
@@ -23,13 +27,14 @@ pub struct Portfolio {
 }
 
 impl Portfolio {
-    pub fn new() -> Self {
+    pub fn new(env: &Env) -> Self {
         Self {
-            balances: Map::new(),
-            trades: Map::new(),
-            pnl: Map::new(),
-            badges: Map::new(),
+            balances: Map::new(env),
+            trades: Map::new(env),
+            pnl: Map::new(env),
+            badges: Map::new(env),
         }
+    }
 
     /// Transfer a user's balance from one asset to another.
     /// Fails if amount <= 0 or if the user has insufficient funds in the source asset.
@@ -41,43 +46,57 @@ impl Portfolio {
         user: Address,
         amount: i128,
     ) {
-        assert!(amount > 0, "Amount must be positive");
+        self.swap_asset(env, from_token, to_token, user, amount, amount);
+    }
+
+    /// Swap assets with different input and output amounts
+    pub fn swap_asset(
+        &mut self,
+        _env: &Env,
+        from_token: Asset,
+        to_token: Asset,
+        user: Address,
+        in_amount: i128,
+        out_amount: i128,
+    ) {
+        assert!(in_amount > 0, "Input amount must be positive");
+        assert!(out_amount >= 0, "Output amount must be non-negative");
 
         // Debit from source asset
         let from_key = (user.clone(), from_token);
-        let from_balance = self.balances.get(env, &from_key).unwrap_or(0);
-        assert!(from_balance >= amount, "Insufficient funds");
-        let new_from = from_balance - amount;
-        self.balances.set(env, &from_key, &new_from);
+        let from_balance = self.balances.get(from_key.clone()).unwrap_or(0);
+        assert!(from_balance >= in_amount, "Insufficient funds");
+        let new_from = from_balance - in_amount;
+        self.balances.set(from_key, new_from);
 
         // Credit to destination asset
         let to_key = (user.clone(), to_token);
-        let to_balance = self.balances.get(env, &to_key).unwrap_or(0);
-        let new_to = to_balance + amount;
-        self.balances.set(env, &to_key, &new_to);
+        let to_balance = self.balances.get(to_key.clone()).unwrap_or(0);
+        let new_to = to_balance + out_amount;
+        self.balances.set(to_key, new_to);
     }
 
 
     /// Mint tokens (XLM or a custom token) to a user’s balance.
-    pub fn mint(&mut self, env: &Env, token: Asset, to: Address, amount: i128) {
+    pub fn mint(&mut self, _env: &Env, token: Asset, to: Address, amount: i128) {
         assert!(amount >= 0, "Amount must be non-negative");
 
         let key = (to.clone(), token.clone());
-        let current = self.balances.get(env, &key).unwrap_or(0);
+        let current = self.balances.get(key.clone()).unwrap_or(0);
         let new_balance = current + amount;
 
-        self.balances.set(env, &key, &new_balance);
+        self.balances.set(key, new_balance);
 
         // Update PnL placeholder
-        let current_pnl = self.pnl.get(env, &to).unwrap_or(0);
-        self.pnl.set(env, &to, &(current_pnl + amount));
+        let current_pnl = self.pnl.get(to.clone()).unwrap_or(0);
+        self.pnl.set(to, current_pnl + amount);
     }
 
     /// Record a swap execution (increase trade count).
     /// Automatically awards "First Trade" badge if this is the user's first trade.
     pub fn record_trade(&mut self, env: &Env, user: Address) {
-        let count = self.trades.get(env, &user).unwrap_or(0);
-        self.trades.set(env, &user, &(count + 1));
+        let count = self.trades.get(user.clone()).unwrap_or(0);
+        self.trades.set(user.clone(), count + 1);
 
         // Award "First Trade" badge if this is the first trade
         if count == 0 {
@@ -96,14 +115,14 @@ impl Portfolio {
         }
 
         // Award the badge
-        self.badges.set(env, &key, &true);
+        self.badges.set(key, true);
         true
     }
 
     /// Check if a user has earned a specific badge.
-    pub fn has_badge(&self, env: &Env, user: Address, badge: Badge) -> bool {
+    pub fn has_badge(&self, _env: &Env, user: Address, badge: Badge) -> bool {
         let key = (user, badge);
-        self.badges.get(env, &key).unwrap_or(false)
+        self.badges.get(key).unwrap_or(false)
     }
 
     /// Get all badges earned by a user.
@@ -120,27 +139,27 @@ impl Portfolio {
 
     /// Get balance of a token for a given user.
     /// Returns 0 if no balance exists for the requested token/address.
-    pub fn balance_of(&self, env: &Env, token: Asset, user: Address) -> i128 {
+    pub fn balance_of(&self, _env: &Env, token: Asset, user: Address) -> i128 {
         let key = (user, token);
-        self.balances.get(env, &key).unwrap_or(0)
+        self.balances.get(key).unwrap_or(0)
     }
 
     /// Get portfolio statistics for a user
     /// Returns (trade_count, pnl)
-    pub fn get_portfolio(&self, env: &Env, user: Address) -> (u32, i128) {
-        let trades = self.trades.get(env, &user).unwrap_or(0);
-        let pnl = self.pnl.get(env, &user).unwrap_or(0);
+    pub fn get_portfolio(&self, _env: &Env, user: Address) -> (u32, i128) {
+        let trades = self.trades.get(user.clone()).unwrap_or(0);
+        let pnl = self.pnl.get(user).unwrap_or(0);
         (trades, pnl)
     }
 }
 
 
 #[test]
-#[should_panic(expected = "Amount must be positive")] 
+#[should_panic(expected = "Amount must be non-negative")] 
 fn test_mint_negative_should_panic() {
     let env = Env::default(); 
     let user = Address::generate(&env); 
-    let mut portfolio = Portfolio::new(); 
+    let mut portfolio = Portfolio::new(&env); 
 
     // This should panic 
     portfolio.mint(&env, Asset::XLM, user.clone(), -100);
@@ -150,7 +169,7 @@ fn test_mint_negative_should_panic() {
 fn test_balance_of_returns_zero_for_new_user() {
     let env = Env::default();
     let user = Address::generate(&env);
-    let portfolio = Portfolio::new();
+    let portfolio = Portfolio::new(&env);
     
     // Should return 0 for a user with no balance
     assert_eq!(portfolio.balance_of(&env, Asset::XLM, user), 0);
@@ -160,7 +179,7 @@ fn test_balance_of_returns_zero_for_new_user() {
 fn test_balance_of_returns_correct_balance_after_mint() {
     let env = Env::default();
     let user = Address::generate(&env);
-    let mut portfolio = Portfolio::new();
+    let mut portfolio = Portfolio::new(&env);
     let amount = 1000;
     
     // Mint some tokens
@@ -174,7 +193,7 @@ fn test_balance_of_returns_correct_balance_after_mint() {
 fn test_balance_of_returns_updated_balance_after_multiple_mints() {
     let env = Env::default();
     let user = Address::generate(&env);
-    let mut portfolio = Portfolio::new();
+    let mut portfolio = Portfolio::new(&env);
     
     // First mint
     portfolio.mint(&env, Asset::XLM, user.clone(), 500);
@@ -193,7 +212,7 @@ fn test_balance_of_returns_updated_balance_after_multiple_mints() {
 fn test_balance_of_works_with_custom_assets() {
     let env = Env::default();
     let user = Address::generate(&env);
-    let mut portfolio = Portfolio::new();
+    let mut portfolio = Portfolio::new(&env);
     let custom_asset = Asset::Custom(soroban_sdk::symbol_short!("USDC"));
     
     // Mint to custom asset
@@ -208,7 +227,7 @@ fn test_balance_of_isolates_different_users() {
     let env = Env::default();
     let user1 = Address::generate(&env);
     let user2 = Address::generate(&env);
-    let mut portfolio = Portfolio::new();
+    let mut portfolio = Portfolio::new(&env);
     
     // Mint to user1
     portfolio.mint(&env, Asset::XLM, user1.clone(), 1000);
@@ -224,7 +243,7 @@ fn test_balance_of_isolates_different_users() {
 #[test]
 fn test_award_first_trade_badge() {
     let env = Env::default();
-    let mut portfolio = Portfolio::new();
+    let mut portfolio = Portfolio::new(&env);
     let user = Address::generate(&env);
 
     // User should not have any badges initially
@@ -249,7 +268,7 @@ fn test_award_first_trade_badge() {
 #[test]
 fn test_prevent_duplicate_badge_assignment() {
     let env = Env::default();
-    let mut portfolio = Portfolio::new();
+    let mut portfolio = Portfolio::new(&env);
     let user = Address::generate(&env);
 
     // Record first trade - should award badge
@@ -275,7 +294,7 @@ fn test_prevent_duplicate_badge_assignment() {
 #[test]
 fn test_badges_are_user_specific() {
     let env = Env::default();
-    let mut portfolio = Portfolio::new();
+    let mut portfolio = Portfolio::new(&env);
     let user1 = Address::generate(&env);
     let user2 = Address::generate(&env);
 
@@ -298,7 +317,7 @@ fn test_badges_are_user_specific() {
 #[test]
 fn test_badge_persistence() {
     let env = Env::default();
-    let mut portfolio = Portfolio::new();
+    let mut portfolio = Portfolio::new(&env);
     let user = Address::generate(&env);
 
     // Award badge via trade
@@ -317,7 +336,7 @@ fn test_badge_persistence() {
 #[test]
 fn test_new_user_has_no_badges() {
     let env = Env::default();
-    let portfolio = Portfolio::new();
+    let portfolio = Portfolio::new(&env);
     let user = Address::generate(&env);
 
     // New user should have no badges
@@ -329,7 +348,7 @@ fn test_new_user_has_no_badges() {
 #[test]
 fn test_rewards_integrate_with_trade_counting() {
     let env = Env::default();
-    let mut portfolio = Portfolio::new();
+    let mut portfolio = Portfolio::new(&env);
     let user = Address::generate(&env);
 
     // Get initial portfolio stats
