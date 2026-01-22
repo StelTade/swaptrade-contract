@@ -1,7 +1,7 @@
 extern crate alloc;
-use soroban_sdk::{contracttype, Address, Env, Symbol, Map, Vec};
+use soroban_sdk::{contracttype, Address, Env, Symbol, Map, Vec, symbol_short};
 #[cfg(test)]
-use soroban_sdk::testutils::Address as TestAddress;
+use soroban_sdk::testutils::Address as _;
 
 #[derive(Clone)]
 #[contracttype]
@@ -192,33 +192,23 @@ impl Portfolio {
     }
 
     /// Check if a user has earned a specific badge.
-    pub fn has_badge(&self, env: &Env, user: Address, badge: Badge) -> bool {
+    pub fn has_badge(&self, _env: &Env, user: Address, badge: Badge) -> bool {
         let key = (user, badge);
     self.badges.get(key).unwrap_or(false)
     }
 
-    /// Get all badges earned by a user.
-    pub fn get_user_badges(&self, env: &Env, user: Address) -> Vec<Badge> {
-    let mut badges = Vec::new(env);
 
-        // Check for FirstTrade badge
-        if self.has_badge(env, user.clone(), Badge::FirstTrade) {
-            badges.push_back(Badge::FirstTrade);
-        }
-
-        badges
-    }
 
     /// Get balance of a token for a given user.
     /// Returns 0 if no balance exists for the requested token/address.
-    pub fn balance_of(&self, env: &Env, token: Asset, user: Address) -> i128 {
+    pub fn balance_of(&self, _env: &Env, token: Asset, user: Address) -> i128 {
     let key = (user, token);
     self.balances.get(key).unwrap_or(0)
     }
 
     /// Get portfolio statistics for a user
     /// Returns (trade_count, pnl)
-    pub fn get_portfolio(&self, env: &Env, user: Address) -> (u32, i128) {
+    pub fn get_portfolio(&self, _env: &Env, user: Address) -> (u32, i128) {
         let trades = self.trades.get(user.clone()).unwrap_or(0);
         let pnl = self.pnl.get(user).unwrap_or(0);
         (trades, pnl)
@@ -333,7 +323,7 @@ impl Portfolio {
     }
 
     /// Get total balance across all assets for a user
-    fn get_total_user_balance(&self, env: &Env, user: Address) -> i128 {
+    fn get_total_user_balance(&self, _env: &Env, user: Address) -> i128 {
         // Sum balances across all assets (simplified - just returns PnL as proxy)
         self.pnl.get(user).unwrap_or(0)
     }
@@ -401,7 +391,7 @@ impl Portfolio {
     // ===== HELPER FUNCTION FOR TOKEN PAIR FORMATTING =====
     
     /// Format a token pair for tracking (handles ordering)
-    fn format_pair_helper(from: Symbol, to: Symbol) -> Symbol {
+    fn format_pair_helper(from: Symbol, _to: Symbol) -> Symbol {
         // Simple pair identifier (in production, you might use a hash)
         from
     }
@@ -433,16 +423,16 @@ impl Portfolio {
     /// Capped at top 100 for safety
     /// Returns Vec<(Address, i128)>: list of (user, pnl) pairs sorted by PnL descending
     /// Time complexity: O(1) - precomputed top 100
-    pub fn get_top_traders(&self, limit: u32) -> Vec<(Address, i128)> {
+    pub fn get_top_traders(&self, env: &Env, limit: u32) -> Vec<(Address, i128)> {
         let max_limit = 100u32;
         let actual_limit = if limit > max_limit { max_limit } else { limit };
         
-        let mut result = Vec::new_uninitialized(self.active_users.get_env());
+        let mut result = Vec::new(env);
         let len = self.top_traders.len();
-        let cap = if len < actual_limit as usize { len } else { actual_limit as usize };
+        let cap = if len < actual_limit { len } else { actual_limit };
         
         for i in 0..cap {
-            if let Some(trader) = self.top_traders.get(i as u32) {
+            if let Some(trader) = self.top_traders.get(i) {
                 result.push_back(trader);
             }
         }
@@ -458,7 +448,7 @@ impl Portfolio {
 
     /// Helper: Update aggregate stats when a trade is recorded
     /// Called lazily during trade operations
-    fn update_stats_on_trade(&mut self, env: &Env, user: Address, swap_amount: i128) {
+    fn update_stats_on_trade(&mut self, _env: &Env, user: Address, swap_amount: i128) {
         // Check if user is new (not in trades map)
         let trade_count = self.trades.get(user.clone()).unwrap_or(0);
         if trade_count == 0 {
@@ -485,7 +475,7 @@ impl Portfolio {
 
     /// Helper: Update top traders leaderboard after PnL changes
     /// Maintains top 100 traders sorted by PnL descending
-    fn update_top_traders(&mut self, env: &Env, user: Address) {
+    fn update_top_traders(&mut self, _env: &Env, user: Address) {
         let user_pnl = self.pnl.get(user.clone()).unwrap_or(0);
         
         // Check if user is already in top_traders
@@ -546,6 +536,30 @@ impl Portfolio {
     pub fn collect_fee(&mut self, fee_amount: i128) {
         self.total_fees_collected = self.total_fees_collected.saturating_add(fee_amount);
     }
+
+    pub fn set_liquidity(&mut self, asset: Asset, amount: i128) {
+        match asset {
+            Asset::XLM => self.xlm_in_pool = amount,
+            Asset::Custom(sym) => {
+                if sym == symbol_short!("USDCSIM") {
+                    self.usdc_in_pool = amount;
+                }
+            }
+        }
+    }
+
+    pub fn get_liquidity(&self, asset: Asset) -> i128 {
+        match asset {
+            Asset::XLM => self.xlm_in_pool,
+            Asset::Custom(sym) => {
+                if sym == symbol_short!("USDCSIM") {
+                    self.usdc_in_pool
+                } else {
+                    0
+                }
+            }
+        }
+    }
 }
 
 #[derive(Clone, Default)]
@@ -558,11 +572,10 @@ pub struct Metrics {
 
 
 #[test]
-#[should_panic(expected = "Amount must be positive")] 
+#[should_panic(expected = "Amount must be non-negative")] 
 fn test_mint_negative_should_panic() {
     let env = Env::default(); 
-    use soroban_sdk::testutils::Address;
-    let user = TestAddress::generate(&env);
+    let user = Address::generate(&env);
     let mut portfolio = Portfolio::new(&env); 
 
     // This should panic 
@@ -572,7 +585,7 @@ fn test_mint_negative_should_panic() {
 #[test]
 fn test_balance_of_returns_zero_for_new_user() {
     let env = Env::default();
-    let user = TestAddress::generate(&env);
+    let user = Address::generate(&env);
     let portfolio = Portfolio::new(&env);
     
     // Should return 0 for a user with no balance
@@ -582,7 +595,7 @@ fn test_balance_of_returns_zero_for_new_user() {
 #[test]
 fn test_balance_of_returns_correct_balance_after_mint() {
     let env = Env::default();
-    let user = TestAddress::generate(&env);
+    let user = Address::generate(&env);
     let mut portfolio = Portfolio::new(&env);
     let amount = 1000;
     
@@ -596,7 +609,7 @@ fn test_balance_of_returns_correct_balance_after_mint() {
 #[test]
 fn test_balance_of_returns_updated_balance_after_multiple_mints() {
     let env = Env::default();
-    let user = TestAddress::generate(&env);
+    let user = Address::generate(&env);
     let mut portfolio = Portfolio::new(&env);
     
     // First mint
@@ -615,7 +628,7 @@ fn test_balance_of_returns_updated_balance_after_multiple_mints() {
 #[test]
 fn test_balance_of_works_with_custom_assets() {
     let env = Env::default();
-    let user = TestAddress::generate(&env);
+    let user = Address::generate(&env);
     let mut portfolio = Portfolio::new(&env);
     let custom_asset = Asset::Custom(soroban_sdk::symbol_short!("USDC"));
     
@@ -648,7 +661,7 @@ fn test_balance_of_isolates_different_users() {
 fn test_award_first_trade_badge() {
     let env = Env::default();
     let mut portfolio = Portfolio::new(&env);
-    let user = TestAddress::generate(&env);
+    let user = Address::generate(&env);
 
     // User should not have any badges initially
     let badges_before = portfolio.get_user_badges(&env, user.clone());
@@ -673,7 +686,7 @@ fn test_award_first_trade_badge() {
 fn test_prevent_duplicate_badge_assignment() {
     let env = Env::default();
     let mut portfolio = Portfolio::new(&env);
-    let user = TestAddress::generate(&env);
+    let user = Address::generate(&env);
 
     // Record first trade - should award badge
     portfolio.record_trade(&env, user.clone());
@@ -698,7 +711,7 @@ fn test_prevent_duplicate_badge_assignment() {
 #[test]
 fn test_badges_are_user_specific() {
     let env = Env::default();
-    let mut portfolio = Portfolio::new();
+    let mut portfolio = Portfolio::new(&env);
     let user1 = Address::generate(&env);
     let user2 = Address::generate(&env);
 
@@ -721,7 +734,7 @@ fn test_badges_are_user_specific() {
 #[test]
 fn test_badge_persistence() {
     let env = Env::default();
-    let mut portfolio = Portfolio::new();
+    let mut portfolio = Portfolio::new(&env);
     let user = Address::generate(&env);
 
     // Award badge via trade
@@ -740,7 +753,7 @@ fn test_badge_persistence() {
 #[test]
 fn test_new_user_has_no_badges() {
     let env = Env::default();
-    let portfolio = Portfolio::new();
+    let portfolio = Portfolio::new(&env);
     let user = Address::generate(&env);
 
     // New user should have no badges
@@ -752,7 +765,7 @@ fn test_new_user_has_no_badges() {
 #[test]
 fn test_rewards_integrate_with_trade_counting() {
     let env = Env::default();
-    let mut portfolio = Portfolio::new();
+    let mut portfolio = Portfolio::new(&env);
     let user = Address::generate(&env);
 
     // Get initial portfolio stats
