@@ -2,8 +2,11 @@ extern crate alloc;
 use soroban_sdk::{contracttype, Address, Env, Symbol, Map, Vec, symbol_short};
 #[cfg(test)]
 use soroban_sdk::testutils::Address as _;
-
+use crate::events::*;
+use soroban_sdk::symbol_short;
 use crate::tiers::{UserTier, calculate_user_tier};
+use crate::emergency;
+
 
 #[derive(Clone)]
 #[contracttype]
@@ -614,6 +617,11 @@ pub struct Metrics {
     pub balances_updated: u32,
 }
 
+pub fn mint(&mut self, env: &Env, token: Asset, to: Address, amount: i128) {
+    assert!(!emergency::is_paused(env), "Contract is paused");
+    assert!(!emergency::is_frozen(env, to.clone()), "User is frozen");
+    // existing mint logic...
+}
 
 #[test]
 #[should_panic(expected = "Amount must be non-negative")] 
