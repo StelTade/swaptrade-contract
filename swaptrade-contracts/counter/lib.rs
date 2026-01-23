@@ -6,6 +6,7 @@ pub use portfolio::Badge;
 mod trading;
 use trading::perform_swap;
 mod referral;
+mod rewards;
 use referral::ReferralSystem;
 
 #[contract]
