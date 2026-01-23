@@ -1,6 +1,8 @@
 use soroban_sdk::{contract, contractimpl, Address, Env, Symbol, Vec, symbol_short};
 
 // Bring in modules from parent directory
+mod events;
+use events::Events;
 mod portfolio { include!("../portfolio.rs"); }
 mod trading { include!("../trading.rs"); }
 mod batch { include!("../batch.rs"); }
@@ -12,6 +14,8 @@ pub use portfolio::{Badge, Metrics};
 pub use tiers::UserTier;
 use trading::perform_swap;
 use tiers::calculate_user_tier;
+use crate::events::Events;
+
 
 // Batch imports
 use batch::{
@@ -317,6 +321,22 @@ impl CounterContract {
     pub fn execute_batch(env: Env, operations: Vec<BatchOperation>) -> BatchResult {
         Self::execute_batch_atomic(env, operations)
     }
+
+    pub fn swap(env: Env, from: Symbol, to: Symbol, amount: i128, user: Address) -> i128 {
+    ...
+    let out_amount = perform_swap(&env, &mut portfolio, from, to, swap_amount, user.clone());
+
+    // Emit event
+    Events::swap_executed(
+        &env,
+        from,
+        to,
+        amount,
+        out_amount,
+        user.clone(),
+        env.ledger().timestamp(),
+    );
+}
 }
 
 #[cfg(test)]
