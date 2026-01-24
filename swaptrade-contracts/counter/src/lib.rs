@@ -5,6 +5,8 @@ mod events;
 mod rewards;
 mod rate_limit;
 mod emergency;
+mod validation;
+
 // defined in events mod
 mod portfolio { include!("../portfolio.rs"); }
 mod trading { include!("../trading.rs"); }
@@ -19,6 +21,8 @@ pub use rate_limit::{RateLimiter, RateLimitStatus};
 use trading::perform_swap;
 // tiers import removed (unused)
 use crate::events::Events;
+use validation::*;
+
 
 
 // Batch imports
