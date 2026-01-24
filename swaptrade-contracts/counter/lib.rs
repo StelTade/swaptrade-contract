@@ -301,6 +301,16 @@ impl CounterContract {
     }
 }
 
+// counter/src/lib.rs
+mod trading;
+mod portfolio;
+mod errors;
+
+pub use trading::swap_tokens;
+pub use portfolio::{get_balance, deposit, withdraw};
+pub use errors::ContractError;
+
+
 #[cfg(test)]
 mod balance_test;
 
