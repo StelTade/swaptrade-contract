@@ -14,7 +14,7 @@ fn test_single_leg_batch_identical_to_direct() {
     
     let user = Address::generate(&env);
     let xlm = symbol_short!("XLM");
-    let usdc = symbol_short!("USDC-SIM");
+    let usdc = symbol_short!("USDCSIM");
     
     // Mint tokens for both tests
     client.mint(&xlm, &user, &2000);
@@ -53,7 +53,7 @@ fn test_three_leg_batch_strategy() {
     
     let user = Address::generate(&env);
     let xlm = symbol_short!("XLM");
-    let usdc = symbol_short!("USDC-SIM");
+    let usdc = symbol_short!("USDCSIM");
     
     // Setup: Mint initial tokens
     client.mint(&xlm, &user, &2000);
@@ -76,7 +76,7 @@ fn test_three_leg_batch_strategy() {
         if let Some(result) = batch_result.results.get(i) {
             match result {
                 OperationResult::Success(_) => continue,
-                OperationResult::Error(_) => panic!("Operation {} failed", i),
+                OperationResult::OpError(_) => panic!("Operation {} failed", i),
             }
         }
     }
@@ -98,7 +98,7 @@ fn test_batch_with_add_liquidity_and_swap() {
     
     let user = Address::generate(&env);
     let xlm = symbol_short!("XLM");
-    let usdc = symbol_short!("USDC-SIM");
+    let usdc = symbol_short!("USDCSIM");
     
     // Setup: Mint initial tokens
     client.mint(&xlm, &user, &1000);
@@ -126,7 +126,7 @@ fn test_batch_with_remove_liquidity() {
     
     let user = Address::generate(&env);
     let xlm = symbol_short!("XLM");
-    let usdc = symbol_short!("USDC-SIM");
+    let usdc = symbol_short!("USDCSIM");
     
     // Setup: Mint initial tokens and add liquidity
     client.mint(&xlm, &user, &1000);
@@ -159,7 +159,7 @@ fn test_atomic_batch_rollback_on_failure() {
     
     let user = Address::generate(&env);
     let xlm = symbol_short!("XLM");
-    let usdc = symbol_short!("USDC-SIM");
+    let usdc = symbol_short!("USDCSIM");
     
     // Setup: Mint only 500 XLM
     client.mint(&xlm, &user, &500);
@@ -191,7 +191,7 @@ fn test_best_effort_continues_on_failure() {
     
     let user = Address::generate(&env);
     let xlm = symbol_short!("XLM");
-    let usdc = symbol_short!("USDC-SIM");
+    let usdc = symbol_short!("USDCSIM");
     
     // Setup: Mint tokens
     client.mint(&xlm, &user, &1000);
@@ -217,7 +217,7 @@ fn test_best_effort_continues_on_failure() {
     }
     
     // Verify second operation failed
-    if let Some(OperationResult::Error(_)) = batch_result.results.get(1) {
+    if let Some(OperationResult::OpError(_)) = batch_result.results.get(1) {
         // Good
     } else {
         panic!("Second operation should fail");
@@ -233,7 +233,7 @@ fn test_atomicity_three_operations_middle_fails() {
     
     let user = Address::generate(&env);
     let xlm = symbol_short!("XLM");
-    let usdc = symbol_short!("USDC-SIM");
+    let usdc = symbol_short!("USDCSIM");
     
     // Setup: Mint limited tokens
     client.mint(&xlm, &user, &400);
@@ -264,7 +264,7 @@ fn test_validation_catches_invalid_amount() {
     
     let user = Address::generate(&env);
     let xlm = symbol_short!("XLM");
-    let usdc = symbol_short!("USDC-SIM");
+    let usdc = symbol_short!("USDCSIM");
     
     // Create batch with negative amount (invalid)
     let mut batch_ops = Vec::new(&env);
@@ -305,7 +305,7 @@ fn test_batch_size_limit_enforced() {
     
     let user = Address::generate(&env);
     let xlm = symbol_short!("XLM");
-    let usdc = symbol_short!("USDC-SIM");
+    let usdc = symbol_short!("USDCSIM");
     
     // Create batch with 11 operations (exceeds MAX_BATCH_SIZE of 10)
     let mut batch_ops = Vec::new(&env);
@@ -346,7 +346,7 @@ fn test_complex_multi_operation_strategy() {
     
     let user = Address::generate(&env);
     let xlm = symbol_short!("XLM");
-    let usdc = symbol_short!("USDC-SIM");
+    let usdc = symbol_short!("USDCSIM");
     
     // Setup: Mint initial capital
     client.mint(&xlm, &user, &2000);
@@ -378,7 +378,7 @@ fn test_batch_updates_portfolio_stats() {
     
     let user = Address::generate(&env);
     let xlm = symbol_short!("XLM");
-    let usdc = symbol_short!("USDC-SIM");
+    let usdc = symbol_short!("USDCSIM");
     
     // Setup
     client.mint(&xlm, &user, &1000);
@@ -408,7 +408,7 @@ fn test_batch_multi_user_isolation() {
     let user1 = Address::generate(&env);
     let user2 = Address::generate(&env);
     let xlm = symbol_short!("XLM");
-    let usdc = symbol_short!("USDC-SIM");
+    let usdc = symbol_short!("USDCSIM");
     
     // Setup
     client.mint(&xlm, &user1, &1000);
@@ -442,7 +442,7 @@ fn test_clear_error_messages() {
     
     let user = Address::generate(&env);
     let xlm = symbol_short!("XLM");
-    let usdc = symbol_short!("USDC-SIM");
+    let usdc = symbol_short!("USDCSIM");
     
     // Create batch with various invalid operations
     let mut batch_ops = Vec::new(&env);
@@ -452,7 +452,7 @@ fn test_clear_error_messages() {
     
     // Verify error result is returned
     assert!(batch_result.operations_failed > 0);
-    if let Some(OperationResult::Error(err_sym)) = batch_result.results.get(0) {
+    if let Some(OperationResult::OpError(err_sym)) = batch_result.results.get(0) {
         // Error symbol should be meaningful
         assert!(!err_sym.to_string().is_empty());
     }

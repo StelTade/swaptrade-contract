@@ -1,12 +1,10 @@
 use soroban_sdk::{Env, Symbol, Address, symbol_short};
-use soroban_sdk::{Env, Symbol, Address, symbol_short};
-use crate::events::SwapExecuted;
+// use crate::events::SwapExecuted;
 use crate::portfolio::{Portfolio, Asset};
 use crate::oracle::{get_stored_price, ContractError};
 
 const PRECISION: u128 = 1_000_000_000_000_000_000; // 1e18
 const STALE_THRESHOLD_SECONDS: u64 = 600; // 10 minutes
-let out_amount = actual_out as i128;
 
 
 fn symbol_to_asset(sym: &Symbol) -> Option<Asset> {
@@ -19,17 +17,6 @@ fn symbol_to_asset(sym: &Symbol) -> Option<Asset> {
     }
 }
 
-env.events().publish(
-    (symbol_short!("SwapExecuted"), user.clone(), from.clone(), to.clone()),
-    SwapExecuted {
-        from_token: from.clone(),
-        to_token: to.clone(),
-        from_amount: amount,
-        to_amount: out_amount,
-        user: user.clone(),
-        timestamp: env.ledger().timestamp(),
-    },
-);
 
 
 // Helper to get price with staleness check

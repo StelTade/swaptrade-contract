@@ -109,8 +109,8 @@ pub fn record_volume(env: &Env, amount: i128) {
     let mut volume_map: Map<u64, i128> =
         env.storage().instance().get(&EmergencyKey::BlockVolume).unwrap_or(Map::new(env));
 
-    let current = volume_map.get(height).unwrap_or(0);
-    volume_map.set(height, current.saturating_add(amount));
+    let current = volume_map.get(height.into()).unwrap_or(0);
+    volume_map.set(height.into(), current.saturating_add(amount));
     env.storage().instance().set(&EmergencyKey::BlockVolume, &volume_map);
 }
 
@@ -123,7 +123,7 @@ pub fn get_block_volume(env: &Env, height: u64) -> i128 {
 pub fn circuit_breaker_check(env: &Env, amount: i128, normal_volume: i128) {
     let threshold = get_threshold_bps(env);
     let height = env.ledger().sequence();
-    let current = get_block_volume(env, height);
+    let current = get_block_volume(env, height.into());
     let projected = current.saturating_add(amount);
 
     // If current > normal * threshold, pause
@@ -156,9 +156,10 @@ pub fn snapshot(env: &Env, portfolio: &crate::portfolio::Portfolio) -> StateSnap
     let volume_map: Map<u64, i128> =
         env.storage().instance().get(&EmergencyKey::BlockVolume).unwrap_or(Map::new(env));
 
-    for i in 0..volume_map.len() {
-        if let Some((h, v)) = volume_map.get(i) {
-            block_volume.push_back((h, v));
+    let keys = volume_map.keys();
+    for key in keys.iter() {
+        if let Some(v) = volume_map.get(key.clone()) {
+            block_volume.push_back((key, v));
         }
     }
 

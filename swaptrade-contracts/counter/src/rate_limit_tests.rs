@@ -1,11 +1,11 @@
 #[cfg(test)]
 mod rate_limit_tests {
     use crate::{CounterContract, RateLimiter, UserTier};
-    use soroban_sdk::{testutils::*, Address, Env, Symbol, symbol_short};
+    use soroban_sdk::{testutils::{self, Address as _, Ledger}, Address, Env, Symbol, symbol_short};
 
     fn create_test_env() -> (Env, Address) {
         let env = Env::default();
-        let user = Address::random(&env);
+        let user = Address::generate(&env);
         (env, user)
     }
 
@@ -232,8 +232,8 @@ mod rate_limit_tests {
     #[test]
     fn test_different_users_independent_limits() {
         let env = Env::default();
-        let user1 = Address::random(&env);
-        let user2 = Address::random(&env);
+        let user1 = Address::generate(&env);
+        let user2 = Address::generate(&env);
         let novice = UserTier::Novice;
 
         // User1 consumes 5 swaps
