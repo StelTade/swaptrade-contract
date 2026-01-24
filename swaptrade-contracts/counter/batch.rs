@@ -32,7 +32,7 @@ pub enum OperationResult {
     Success(i128),
     
     /// Failure with error message
-    Error(Symbol),
+    OpError(Symbol),
 }
 
 /// Container for batch execution results
@@ -164,7 +164,7 @@ pub fn execute_batch_atomic(
                 Err(error_sym) => {
                     // Rollback: restore portfolio to snapshot
                     *portfolio = snapshot;
-                    batch_result.results.push_back(OperationResult::Error(error_sym));
+                    batch_result.results.push_back(OperationResult::OpError(error_sym));
                     batch_result.operations_failed += 1;
                     
                     // Return error with partial results
@@ -198,7 +198,7 @@ pub fn execute_batch_best_effort(
                     batch_result.operations_executed += 1;
                 }
                 Err(error_sym) => {
-                    batch_result.results.push_back(OperationResult::Error(error_sym));
+                    batch_result.results.push_back(OperationResult::OpError(error_sym));
                     batch_result.operations_failed += 1;
                 }
             }
@@ -283,7 +283,7 @@ mod tests {
     #[test]
     fn test_validate_batch_size_limit() {
         let env = Env::default();
-        let user = TestAddress::generate(&env);
+        let user = Address::generate(&env);
         
         // Create batch with more than MAX_BATCH_SIZE operations
         let mut operations = Vec::new(&env);
@@ -314,7 +314,7 @@ mod tests {
     #[test]
     fn test_validate_invalid_swap_amount() {
         let env = Env::default();
-        let user = TestAddress::generate(&env);
+        let user = Address::generate(&env);
         
         let mut operations = Vec::new(&env);
         operations.push_back(BatchOperation::Swap(
@@ -332,7 +332,7 @@ mod tests {
     #[test]
     fn test_validate_same_token_swap() {
         let env = Env::default();
-        let user = TestAddress::generate(&env);
+        let user = Address::generate(&env);
         
         let mut operations = Vec::new(&env);
         operations.push_back(BatchOperation::Swap(

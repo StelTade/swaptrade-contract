@@ -1,4 +1,4 @@
-use soroban_sdk::{Address, Env, Event, Symbol};
+use soroban_sdk::{Address, Env, Symbol};
 
 pub struct Events;
 
@@ -12,13 +12,10 @@ impl Events {
         user: Address,
         timestamp: i64,
     ) {
-        Event::new(env)
-            .topic("SwapExecuted")
-            .topic(user.clone())
-            .topic(from_token.clone())
-            .topic(to_token.clone())
-            .data((from_amount, to_amount, timestamp))
-            .publish();
+        env.events().publish(
+            (Symbol::new(env, "SwapExecuted"), user, from_token, to_token),
+            (from_amount, to_amount, timestamp),
+        );
     }
 
     pub fn liquidity_added(
@@ -29,11 +26,10 @@ impl Events {
         user: Address,
         timestamp: i64,
     ) {
-        Event::new(env)
-            .topic("LiquidityAdded")
-            .topic(user.clone())
-            .data((xlm_amount, usdc_amount, lp_tokens_minted, timestamp))
-            .publish();
+        env.events().publish(
+            (Symbol::new(env, "LiquidityAdded"), user),
+            (xlm_amount, usdc_amount, lp_tokens_minted, timestamp),
+        );
     }
 
     pub fn liquidity_removed(
@@ -44,11 +40,10 @@ impl Events {
         user: Address,
         timestamp: i64,
     ) {
-        Event::new(env)
-            .topic("LiquidityRemoved")
-            .topic(user.clone())
-            .data((xlm_amount, usdc_amount, lp_tokens_burned, timestamp))
-            .publish();
+        env.events().publish(
+            (Symbol::new(env, "LiquidityRemoved"), user),
+            (xlm_amount, usdc_amount, lp_tokens_burned, timestamp),
+        );
     }
 
     pub fn badge_awarded(
@@ -57,11 +52,10 @@ impl Events {
         badge: crate::portfolio::Badge,
         timestamp: i64,
     ) {
-        Event::new(env)
-            .topic("BadgeAwarded")
-            .topic(user.clone())
-            .data((badge, timestamp))
-            .publish();
+        env.events().publish(
+            (Symbol::new(env, "BadgeAwarded"), user),
+            (badge, timestamp),
+        );
     }
 
     pub fn user_tier_changed(
@@ -71,26 +65,23 @@ impl Events {
         new_tier: crate::tiers::UserTier,
         timestamp: i64,
     ) {
-        Event::new(env)
-            .topic("UserTierChanged")
-            .topic(user.clone())
-            .data((old_tier, new_tier, timestamp))
-            .publish();
+        env.events().publish(
+            (Symbol::new(env, "UserTierChanged"), user),
+            (old_tier, new_tier, timestamp),
+        );
     }
 
     pub fn admin_paused(env: &Env, admin: Address, timestamp: i64) {
-        Event::new(env)
-            .topic("AdminPaused")
-            .topic(admin.clone())
-            .data((timestamp,))
-            .publish();
+        env.events().publish(
+            (Symbol::new(env, "AdminPaused"), admin),
+            (timestamp,),
+        );
     }
 
     pub fn admin_resumed(env: &Env, admin: Address, timestamp: i64) {
-        Event::new(env)
-            .topic("AdminResumed")
-            .topic(admin.clone())
-            .data((timestamp,))
-            .publish();
+        env.events().publish(
+            (Symbol::new(env, "AdminResumed"), admin),
+            (timestamp,),
+        );
     }
 }

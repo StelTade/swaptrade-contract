@@ -4,7 +4,8 @@ use soroban_sdk::{contract, contractimpl, Address, Env, Symbol, Vec, symbol_shor
 mod events;
 mod rewards;
 mod rate_limit;
-use events::Events;
+mod emergency;
+// defined in events mod
 mod portfolio { include!("../portfolio.rs"); }
 mod trading { include!("../trading.rs"); }
 mod batch { include!("../batch.rs"); }
@@ -12,11 +13,11 @@ mod tiers { include!("../tiers.rs"); }
 pub mod oracle;
 
 use portfolio::{Portfolio, Asset};
-pub use portfolio::{Badge, Metrics};
+pub use portfolio::{Badge, Metrics, Transaction};
 pub use tiers::UserTier;
 pub use rate_limit::{RateLimiter, RateLimitStatus};
 use trading::perform_swap;
-use tiers::calculate_user_tier;
+// tiers import removed (unused)
 use crate::events::Events;
 
 
@@ -125,7 +126,7 @@ impl CounterContract {
         
         // Check rate limit before executing swap
         if let Err(limit_status) = RateLimiter::check_swap_limit(&env, &user, &user_tier) {
-            env.panic_with_error(&symbol_short!("RATELIMIT"));
+            panic!("RATELIMIT");
         }
 
         let fee_bps = user_tier.effective_fee_bps();
@@ -139,10 +140,10 @@ impl CounterContract {
             portfolio.collect_fee(fee_amount);
         }
 
-        let out_amount = perform_swap(&env, &mut portfolio, from, to, swap_amount, user.clone());
+        let out_amount = perform_swap(&env, &mut portfolio, from.clone(), to.clone(), swap_amount, user.clone());
 
-        // Record trade with full amount (for volume tracking)
-        portfolio.record_trade_with_amount(&env, user.clone(), amount);
+        // Record trade with full transaction details
+        portfolio.record_transaction(&env, user.clone(), from, to, amount, out_amount);
 
         // Update user's tier after trade
         let (_new_tier, _tier_changed) = portfolio.update_tier(&env, user.clone());
@@ -209,8 +210,8 @@ impl CounterContract {
             portfolio.collect_fee(fee_amount);
         }
 
-        let out_amount = perform_swap(&env, &mut portfolio, from, to, swap_amount, user.clone());
-        portfolio.record_trade_with_amount(&env, user.clone(), amount);
+        let out_amount = perform_swap(&env, &mut portfolio, from.clone(), to.clone(), swap_amount, user.clone());
+        portfolio.record_transaction(&env, user.clone(), from, to, amount, out_amount);
 
         // Update user's tier after trade
         let (_new_tier, _tier_changed) = portfolio.update_tier(&env, user.clone());
@@ -284,6 +285,16 @@ impl CounterContract {
         portfolio.get_user_badges(&env, user)
     }
 
+    pub fn get_user_transactions(env: Env, user: Address, limit: u32) -> Vec<Transaction> {
+        let portfolio: Portfolio = env
+            .storage()
+            .instance()
+            .get(&())
+            .unwrap_or_else(|| Portfolio::new(&env));
+
+        portfolio.get_user_transactions(&env, user, limit)
+    }
+
     /// Get the current tier for a user
     pub fn get_user_tier(env: Env, user: Address) -> UserTier {
         let portfolio: Portfolio = env
@@ -328,7 +339,7 @@ impl CounterContract {
             .storage()
             .instance()
             .get(&())
-            .unwrap_or_else(Portfolio::new);
+            .unwrap_or_else(|| Portfolio::new(&env));
 
         let result = execute_batch_atomic(&env, &mut portfolio, operations);
 
@@ -350,7 +361,7 @@ impl CounterContract {
             .storage()
             .instance()
             .get(&())
-            .unwrap_or_else(Portfolio::new);
+            .unwrap_or_else(|| Portfolio::new(&env));
 
         let result = execute_batch_best_effort(&env, &mut portfolio, operations);
 
@@ -380,3 +391,5 @@ mod oracle_tests;
 mod batch_tests;
 #[cfg(test)]
 mod rate_limit_tests;
+#[cfg(test)]
+mod transaction_tests;

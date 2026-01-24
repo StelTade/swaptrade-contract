@@ -3,7 +3,7 @@ use soroban_sdk::{contracttype, Address, Env, Symbol, Map, Vec, symbol_short};
 #[cfg(test)]
 use soroban_sdk::testutils::Address as _;
 use crate::events::*;
-use soroban_sdk::symbol_short;
+// use soroban_sdk::symbol_short;
 use crate::tiers::{UserTier, calculate_user_tier};
 use crate::emergency;
 
@@ -62,6 +62,18 @@ pub struct Portfolio {
     token_pairs_traded: Map<Address, Vec<Symbol>>, // unique token pairs per user
     ledger_heights_traded: Map<Address, Vec<u64>>, // ledger heights where user traded
     lp_deposits_count: Map<Address, u32>,  // number of LP deposits per user
+    transactions: Map<Address, Vec<Transaction>>, // transaction history
+}
+
+#[derive(Clone, Debug, PartialEq)] // Added derives for testing
+#[contracttype]
+pub struct Transaction {
+    pub timestamp: u64,
+    pub from_token: Symbol,
+    pub to_token: Symbol,
+    pub from_amount: i128,
+    pub to_amount: i128,
+    pub rate_achieved: u128, // Represented with 7 decimals precision (units of 10^-7)
 }
 
 impl Portfolio {
@@ -85,6 +97,7 @@ impl Portfolio {
             token_pairs_traded: Map::new(env),
             ledger_heights_traded: Map::new(env),
             lp_deposits_count: Map::new(env),
+            transactions: Map::new(env),
         }
     }
 
@@ -175,14 +188,63 @@ impl Portfolio {
         }
     }
 
-    /// Record a swap with amount tracking for volume statistics
-    /// Called when a swap is performed to update trading volume and stats
-    pub fn record_trade_with_amount(&mut self, env: &Env, user: Address, swap_amount: i128) {
+    /// Record a swap execution with full transaction details
+    pub fn record_transaction(
+        &mut self, 
+        env: &Env, 
+        user: Address, 
+        from_token: Symbol, 
+        to_token: Symbol, 
+        from_amount: i128, 
+        to_amount: i128
+    ) {
+        // calculate rate (avoid division by zero)
+        let rate = if from_amount > 0 {
+            (to_amount as u128 * 10_000_000) / (from_amount as u128)
+        } else {
+            0
+        };
+
+        let tx = Transaction {
+            timestamp: env.ledger().timestamp(),
+            from_token: from_token.clone(),
+            to_token: to_token.clone(),
+            from_amount,
+            to_amount,
+            rate_achieved: rate,
+        };
+
+        // Store transaction
+        let mut user_txs = self.transactions.get(user.clone()).unwrap_or(Vec::new(env));
+        user_txs.push_back(tx);
+
+        // Cap at 100 transactions (remove oldest)
+        if user_txs.len() > 100 {
+            user_txs.remove(0); // Remove oldest
+        }
+        self.transactions.set(user.clone(), user_txs);
+
+        // Existing stats updates
         self.record_trade(env, user.clone());
-        self.update_stats_on_trade(env, user.clone(), swap_amount);
+        self.update_stats_on_trade(env, user.clone(), from_amount);
         
         // Update user tier after trade
-        self.update_tier(env, user);
+        self.update_tier(env, user.clone());
+        
+        // Track for badges
+        self.track_trade_for_badges(env, user, from_token, to_token, env.ledger().sequence() as u64);
+    }
+
+    /// Helper for tests/backward compat: record trade with amount only (assumes 1:1 XLM swap for simplicity)
+    pub fn record_trade_with_amount(&mut self, env: &Env, user: Address, swap_amount: i128) {
+        self.record_transaction(
+            env, 
+            user, 
+            symbol_short!("XLM"), 
+            symbol_short!("USDC"), 
+            swap_amount, 
+            swap_amount
+        );
     }
 
     /// Award a badge to a user if they don't already have it.
@@ -196,14 +258,14 @@ impl Portfolio {
         }
 
         // Award the badge
-    self.badges.set(key, true);
+        self.badges.set(key, true);
         true
     }
 
     /// Check if a user has earned a specific badge.
     pub fn has_badge(&self, _env: &Env, user: Address, badge: Badge) -> bool {
         let key = (user, badge);
-    self.badges.get(key).unwrap_or(false)
+        self.badges.get(key).unwrap_or(false)
     }
 
 
@@ -211,8 +273,8 @@ impl Portfolio {
     /// Get balance of a token for a given user.
     /// Returns 0 if no balance exists for the requested token/address.
     pub fn balance_of(&self, _env: &Env, token: Asset, user: Address) -> i128 {
-    let key = (user, token);
-    self.balances.get(key).unwrap_or(0)
+        let key = (user, token);
+        self.balances.get(key).unwrap_or(0)
     }
 
     /// Get portfolio statistics for a user
@@ -221,6 +283,24 @@ impl Portfolio {
         let trades = self.trades.get(user.clone()).unwrap_or(0);
         let pnl = self.pnl.get(user).unwrap_or(0);
         (trades, pnl)
+    }
+    
+    /// Get transaction history for a user
+    pub fn get_user_transactions(&self, env: &Env, user: Address, limit: u32) -> Vec<Transaction> {
+        let transactions = self.transactions.get(user).unwrap_or(Vec::new(env));
+        if transactions.len() <= limit {
+            transactions
+        } else {
+            // Return last 'limit' transactions
+            let start = transactions.len() - limit;
+            let mut result = Vec::new(env);
+            for i in start..transactions.len() {
+               if let Some(tx) = transactions.get(i) {
+                   result.push_back(tx);
+               }
+            }
+            result
+        }
     }
 
     /// Read aggregate metrics
@@ -617,11 +697,6 @@ pub struct Metrics {
     pub balances_updated: u32,
 }
 
-pub fn mint(&mut self, env: &Env, token: Asset, to: Address, amount: i128) {
-    assert!(!emergency::is_paused(env), "Contract is paused");
-    assert!(!emergency::is_frozen(env, to.clone()), "User is frozen");
-    // existing mint logic...
-}
 
 #[test]
 #[should_panic(expected = "Amount must be non-negative")] 
