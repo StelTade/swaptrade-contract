@@ -1,12 +1,7 @@
 extern crate alloc;
-use soroban_sdk::{contracttype, Address, Env, Symbol, Map, Vec, symbol_short};
+use soroban_sdk::{contracttype, Address, Env, Symbol, Map, Vec};
 #[cfg(test)]
-use soroban_sdk::testutils::Address as _;
-use crate::events::*;
-// use soroban_sdk::symbol_short;
-use crate::tiers::{UserTier, calculate_user_tier};
-use crate::emergency;
-
+use soroban_sdk::testutils::Address as TestAddress;
 
 #[derive(Clone)]
 #[contracttype]
@@ -42,12 +37,10 @@ pub enum Badge {
 pub struct Portfolio {
     balances: Map<(Address, Asset), i128>,
     trades: Map<Address, u32>,       // number of trades per user
-    user_volumes: Map<Address, i128>, // total trading volume per user
     pnl: Map<Address, i128>,         // cumulative balance change placeholder
     badges: Map<(Address, Badge), bool>, // tracks which badges each user has earned
-    tiers: Map<Address, UserTier>,   // user tier storage
     metrics: Metrics,                 // lightweight aggregate metrics
-
+    
     // Admin Dashboard Aggregate Stats
     total_users: u32,                 // unique traders/LPs
     total_trading_volume: i128,       // sum of all swap amounts
@@ -56,7 +49,7 @@ pub struct Portfolio {
     xlm_in_pool: i128,               // liquidity pool XLM
     usdc_in_pool: i128,              // liquidity pool USDC
     total_fees_collected: i128,       // accumulated fees
-
+    
     // Badge & Achievement Tracking
     initial_balances: Map<Address, i128>,  // starting balance for WealthBuilder tracking
     token_pairs_traded: Map<Address, Vec<Symbol>>, // unique token pairs per user
@@ -79,6 +72,7 @@ pub struct Transaction {
     pub from_amount: i128,
     pub to_amount: i128,
     pub rate_achieved: u128, // Represented with 7 decimals precision (units of 10^-7)
+    pub migration_time: Option<u64>,      // Timestamp when V2 migration occurred
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -95,10 +89,8 @@ impl Portfolio {
         Self {
             balances: Map::new(env),
             trades: Map::new(env),
-            user_volumes: Map::new(env),
             pnl: Map::new(env),
             badges: Map::new(env),
-            tiers: Map::new(env),
             metrics: Metrics::default(),
             total_users: 0,
             total_trading_volume: 0,
@@ -115,6 +107,7 @@ impl Portfolio {
             lp_positions: Map::new(env),
             total_lp_tokens: 0,
             lp_fees_accumulated: 0,
+            migration_time: None,
         }
     }
 
@@ -155,6 +148,9 @@ impl Portfolio {
     ) {
         self.debit(env, from_token.clone(), user.clone(), amount);
         self.credit(env, to_token.clone(), user.clone(), amount);
+
+        // Update trading volume stats
+        self.update_stats_on_trade(env, user.clone(), amount);
 
         // Optional structured logging
         #[cfg(feature = "logging")]
@@ -233,63 +229,11 @@ impl Portfolio {
         }
     }
 
-    /// Record a swap execution with full transaction details
-    pub fn record_transaction(
-        &mut self, 
-        env: &Env, 
-        user: Address, 
-        from_token: Symbol, 
-        to_token: Symbol, 
-        from_amount: i128, 
-        to_amount: i128
-    ) {
-        // calculate rate (avoid division by zero)
-        let rate = if from_amount > 0 {
-            (to_amount as u128 * 10_000_000) / (from_amount as u128)
-        } else {
-            0
-        };
-
-        let tx = Transaction {
-            timestamp: env.ledger().timestamp(),
-            from_token: from_token.clone(),
-            to_token: to_token.clone(),
-            from_amount,
-            to_amount,
-            rate_achieved: rate,
-        };
-
-        // Store transaction
-        let mut user_txs = self.transactions.get(user.clone()).unwrap_or(Vec::new(env));
-        user_txs.push_back(tx);
-
-        // Cap at 100 transactions (remove oldest)
-        if user_txs.len() > 100 {
-            user_txs.remove(0); // Remove oldest
-        }
-        self.transactions.set(user.clone(), user_txs);
-
-        // Existing stats updates
-        self.record_trade(env, user.clone());
-        self.update_stats_on_trade(env, user.clone(), from_amount);
-        
-        // Update user tier after trade
-        self.update_tier(env, user.clone());
-        
-        // Track for badges
-        self.track_trade_for_badges(env, user, from_token, to_token, env.ledger().sequence() as u64);
-    }
-
-    /// Helper for tests/backward compat: record trade with amount only (assumes 1:1 XLM swap for simplicity)
+    /// Record a swap with amount tracking for volume statistics
+    /// Called when a swap is performed to update trading volume and stats
     pub fn record_trade_with_amount(&mut self, env: &Env, user: Address, swap_amount: i128) {
-        self.record_transaction(
-            env, 
-            user, 
-            symbol_short!("XLM"), 
-            symbol_short!("USDC"), 
-            swap_amount, 
-            swap_amount
-        );
+        self.record_trade(env, user.clone());
+        self.update_stats_on_trade(env, user, swap_amount);
     }
 
     /// Award a badge to a user if they don't already have it.
@@ -303,49 +247,41 @@ impl Portfolio {
         }
 
         // Award the badge
-        self.badges.set(key, true);
+    self.badges.set(key, true);
         true
     }
 
     /// Check if a user has earned a specific badge.
-    pub fn has_badge(&self, _env: &Env, user: Address, badge: Badge) -> bool {
+    pub fn has_badge(&self, env: &Env, user: Address, badge: Badge) -> bool {
         let key = (user, badge);
-        self.badges.get(key).unwrap_or(false)
+    self.badges.get(key).unwrap_or(false)
     }
 
+    /// Get all badges earned by a user.
+    pub fn get_user_badges(&self, env: &Env, user: Address) -> Vec<Badge> {
+    let mut badges = Vec::new(env);
 
+        // Check for FirstTrade badge
+        if self.has_badge(env, user.clone(), Badge::FirstTrade) {
+            badges.push_back(Badge::FirstTrade);
+        }
+
+        badges
+    }
 
     /// Get balance of a token for a given user.
     /// Returns 0 if no balance exists for the requested token/address.
-    pub fn balance_of(&self, _env: &Env, token: Asset, user: Address) -> i128 {
-        let key = (user, token);
-        self.balances.get(key).unwrap_or(0)
+    pub fn balance_of(&self, env: &Env, token: Asset, user: Address) -> i128 {
+    let key = (user, token);
+    self.balances.get(key).unwrap_or(0)
     }
 
     /// Get portfolio statistics for a user
     /// Returns (trade_count, pnl)
-    pub fn get_portfolio(&self, _env: &Env, user: Address) -> (u32, i128) {
+    pub fn get_portfolio(&self, env: &Env, user: Address) -> (u32, i128) {
         let trades = self.trades.get(user.clone()).unwrap_or(0);
         let pnl = self.pnl.get(user).unwrap_or(0);
         (trades, pnl)
-    }
-    
-    /// Get transaction history for a user
-    pub fn get_user_transactions(&self, env: &Env, user: Address, limit: u32) -> Vec<Transaction> {
-        let transactions = self.transactions.get(user).unwrap_or(Vec::new(env));
-        if transactions.len() <= limit {
-            transactions
-        } else {
-            // Return last 'limit' transactions
-            let start = transactions.len() - limit;
-            let mut result = Vec::new(env);
-            for i in start..transactions.len() {
-               if let Some(tx) = transactions.get(i) {
-                   result.push_back(tx);
-               }
-            }
-            result
-        }
     }
 
     /// Read aggregate metrics
@@ -457,7 +393,7 @@ impl Portfolio {
     }
 
     /// Get total balance across all assets for a user
-    fn get_total_user_balance(&self, _env: &Env, user: Address) -> i128 {
+    fn get_total_user_balance(&self, env: &Env, user: Address) -> i128 {
         // Sum balances across all assets (simplified - just returns PnL as proxy)
         self.pnl.get(user).unwrap_or(0)
     }
@@ -522,44 +458,10 @@ impl Portfolio {
         badges
     }
 
-    // ===== USER TIER SYSTEM =====
-
-    /// Get the current tier for a user
-    /// Calculates tier on-the-fly based on current trade count and volume
-    pub fn get_user_tier(&self, _env: &Env, user: Address) -> UserTier {
-        let trade_count = self.trades.get(user.clone()).unwrap_or(0);
-        let volume = self.user_volumes.get(user).unwrap_or(0);
-        calculate_user_tier(trade_count, volume)
-    }
-
-    /// Update and store a user's tier after a trade
-    /// Returns the new tier and whether it changed
-    pub fn update_tier(&mut self, env: &Env, user: Address) -> (UserTier, bool) {
-        let new_tier = self.get_user_tier(env, user.clone());
-        let old_tier = self.tiers.get(user.clone()).unwrap_or(UserTier::Novice);
-
-        let changed = new_tier != old_tier;
-        if changed {
-            self.tiers.set(user.clone(), new_tier.clone());
-
-            // Emit tier change event
-            #[cfg(feature = "logging")]
-            {
-                use soroban_sdk::symbol_short;
-                env.events().publish(
-                    (symbol_short!("tier_changed"), user),
-                    (old_tier, new_tier.clone()),
-                );
-            }
-        }
-
-        (new_tier, changed)
-    }
-
     // ===== HELPER FUNCTION FOR TOKEN PAIR FORMATTING =====
     
     /// Format a token pair for tracking (handles ordering)
-    fn format_pair_helper(from: Symbol, _to: Symbol) -> Symbol {
+    fn format_pair_helper(from: Symbol, to: Symbol) -> Symbol {
         // Simple pair identifier (in production, you might use a hash)
         from
     }
@@ -591,16 +493,16 @@ impl Portfolio {
     /// Capped at top 100 for safety
     /// Returns Vec<(Address, i128)>: list of (user, pnl) pairs sorted by PnL descending
     /// Time complexity: O(1) - precomputed top 100
-    pub fn get_top_traders(&self, env: &Env, limit: u32) -> Vec<(Address, i128)> {
+    pub fn get_top_traders(&self, limit: u32) -> Vec<(Address, i128)> {
         let max_limit = 100u32;
         let actual_limit = if limit > max_limit { max_limit } else { limit };
         
-        let mut result = Vec::new(env);
+        let mut result = Vec::new_uninitialized(self.active_users.get_env());
         let len = self.top_traders.len();
-        let cap = if len < actual_limit { len } else { actual_limit };
+        let cap = if len < actual_limit as usize { len } else { actual_limit as usize };
         
         for i in 0..cap {
-            if let Some(trader) = self.top_traders.get(i) {
+            if let Some(trader) = self.top_traders.get(i as u32) {
                 result.push_back(trader);
             }
         }
@@ -616,12 +518,12 @@ impl Portfolio {
 
     /// Helper: Update aggregate stats when a trade is recorded
     /// Called lazily during trade operations
-    fn update_stats_on_trade(&mut self, _env: &Env, user: Address, swap_amount: i128) {
+    fn update_stats_on_trade(&mut self, env: &Env, user: Address, swap_amount: i128) {
         // Check if user is new (not in trades map)
         let trade_count = self.trades.get(user.clone()).unwrap_or(0);
         if trade_count == 0 {
             self.total_users = self.total_users.saturating_add(1);
-
+            
             // Add to active_users if not already there
             let mut is_active = false;
             for i in 0..self.active_users.len() {
@@ -636,18 +538,14 @@ impl Portfolio {
                 self.active_users.push_back(user.clone());
             }
         }
-
+        
         // Update total trading volume
         self.total_trading_volume = self.total_trading_volume.saturating_add(swap_amount);
-
-        // Update per-user volume
-        let current_user_volume = self.user_volumes.get(user.clone()).unwrap_or(0);
-        self.user_volumes.set(user, current_user_volume.saturating_add(swap_amount));
     }
 
     /// Helper: Update top traders leaderboard after PnL changes
     /// Maintains top 100 traders sorted by PnL descending
-    fn update_top_traders(&mut self, _env: &Env, user: Address) {
+    fn update_top_traders(&mut self, env: &Env, user: Address) {
         let user_pnl = self.pnl.get(user.clone()).unwrap_or(0);
         
         // Check if user is already in top_traders
@@ -791,10 +689,11 @@ pub struct Metrics {
 
 
 #[test]
-#[should_panic(expected = "Amount must be non-negative")] 
+#[should_panic(expected = "Amount must be positive")] 
 fn test_mint_negative_should_panic() {
     let env = Env::default(); 
-    let user = Address::generate(&env);
+    use soroban_sdk::testutils::Address;
+    let user = TestAddress::generate(&env);
     let mut portfolio = Portfolio::new(&env); 
 
     // This should panic 
@@ -804,7 +703,7 @@ fn test_mint_negative_should_panic() {
 #[test]
 fn test_balance_of_returns_zero_for_new_user() {
     let env = Env::default();
-    let user = Address::generate(&env);
+    let user = TestAddress::generate(&env);
     let portfolio = Portfolio::new(&env);
     
     // Should return 0 for a user with no balance
@@ -814,7 +713,7 @@ fn test_balance_of_returns_zero_for_new_user() {
 #[test]
 fn test_balance_of_returns_correct_balance_after_mint() {
     let env = Env::default();
-    let user = Address::generate(&env);
+    let user = TestAddress::generate(&env);
     let mut portfolio = Portfolio::new(&env);
     let amount = 1000;
     
@@ -828,7 +727,7 @@ fn test_balance_of_returns_correct_balance_after_mint() {
 #[test]
 fn test_balance_of_returns_updated_balance_after_multiple_mints() {
     let env = Env::default();
-    let user = Address::generate(&env);
+    let user = TestAddress::generate(&env);
     let mut portfolio = Portfolio::new(&env);
     
     // First mint
@@ -847,7 +746,7 @@ fn test_balance_of_returns_updated_balance_after_multiple_mints() {
 #[test]
 fn test_balance_of_works_with_custom_assets() {
     let env = Env::default();
-    let user = Address::generate(&env);
+    let user = TestAddress::generate(&env);
     let mut portfolio = Portfolio::new(&env);
     let custom_asset = Asset::Custom(soroban_sdk::symbol_short!("USDC"));
     
@@ -880,7 +779,7 @@ fn test_balance_of_isolates_different_users() {
 fn test_award_first_trade_badge() {
     let env = Env::default();
     let mut portfolio = Portfolio::new(&env);
-    let user = Address::generate(&env);
+    let user = TestAddress::generate(&env);
 
     // User should not have any badges initially
     let badges_before = portfolio.get_user_badges(&env, user.clone());
@@ -905,7 +804,7 @@ fn test_award_first_trade_badge() {
 fn test_prevent_duplicate_badge_assignment() {
     let env = Env::default();
     let mut portfolio = Portfolio::new(&env);
-    let user = Address::generate(&env);
+    let user = TestAddress::generate(&env);
 
     // Record first trade - should award badge
     portfolio.record_trade(&env, user.clone());
@@ -930,7 +829,7 @@ fn test_prevent_duplicate_badge_assignment() {
 #[test]
 fn test_badges_are_user_specific() {
     let env = Env::default();
-    let mut portfolio = Portfolio::new(&env);
+    let mut portfolio = Portfolio::new();
     let user1 = Address::generate(&env);
     let user2 = Address::generate(&env);
 
@@ -953,7 +852,7 @@ fn test_badges_are_user_specific() {
 #[test]
 fn test_badge_persistence() {
     let env = Env::default();
-    let mut portfolio = Portfolio::new(&env);
+    let mut portfolio = Portfolio::new();
     let user = Address::generate(&env);
 
     // Award badge via trade
@@ -972,7 +871,7 @@ fn test_badge_persistence() {
 #[test]
 fn test_new_user_has_no_badges() {
     let env = Env::default();
-    let portfolio = Portfolio::new(&env);
+    let portfolio = Portfolio::new();
     let user = Address::generate(&env);
 
     // New user should have no badges
@@ -984,7 +883,7 @@ fn test_new_user_has_no_badges() {
 #[test]
 fn test_rewards_integrate_with_trade_counting() {
     let env = Env::default();
-    let mut portfolio = Portfolio::new(&env);
+    let mut portfolio = Portfolio::new();
     let user = Address::generate(&env);
 
     // Get initial portfolio stats
@@ -1006,172 +905,4 @@ fn test_rewards_integrate_with_trade_counting() {
     // Badge should still be there, but not duplicated
     assert_eq!(portfolio.has_badge(&env, user.clone(), Badge::FirstTrade), true);
     assert_eq!(portfolio.get_user_badges(&env, user).len(), 1);
-}
-
-// ===== USER TIER SYSTEM TESTS =====
-
-/// Test that new users start as Novice tier
-#[test]
-fn test_new_user_starts_as_novice() {
-    let env = Env::default();
-    let portfolio = Portfolio::new(&env);
-    let user = Address::generate(&env);
-
-    let tier = portfolio.get_user_tier(&env, user);
-    assert_eq!(tier, UserTier::Novice);
-}
-
-/// Test tier progression based on trade count
-#[test]
-fn test_tier_progression_by_trades() {
-    let env = Env::default();
-    let mut portfolio = Portfolio::new(&env);
-    let user = Address::generate(&env);
-
-    // Start as Novice
-    assert_eq!(portfolio.get_user_tier(&env, user.clone()), UserTier::Novice);
-
-    // Record 9 trades - still Novice
-    for _ in 0..9 {
-        portfolio.record_trade(&env, user.clone());
-    }
-    assert_eq!(portfolio.get_user_tier(&env, user.clone()), UserTier::Novice);
-
-    // Record 10th trade - becomes Trader
-    portfolio.record_trade(&env, user.clone());
-    assert_eq!(portfolio.get_user_tier(&env, user.clone()), UserTier::Trader);
-
-    // Record 40 more trades - still Trader (need 50 total for Expert)
-    for _ in 0..40 {
-        portfolio.record_trade(&env, user.clone());
-    }
-    assert_eq!(portfolio.get_user_tier(&env, user.clone()), UserTier::Trader);
-
-    // Record 10 more trades - becomes Expert (50 total)
-    for _ in 0..10 {
-        portfolio.record_trade(&env, user.clone());
-    }
-    assert_eq!(portfolio.get_user_tier(&env, user.clone()), UserTier::Expert);
-
-    // Record 150 more trades - becomes Whale (200 total)
-    for _ in 0..150 {
-        portfolio.record_trade(&env, user.clone());
-    }
-    assert_eq!(portfolio.get_user_tier(&env, user.clone()), UserTier::Whale);
-}
-
-/// Test tier progression based on volume
-#[test]
-fn test_tier_progression_by_volume() {
-    let env = Env::default();
-    let mut portfolio = Portfolio::new(&env);
-    let user = Address::generate(&env);
-
-    // Start as Novice
-    assert_eq!(portfolio.get_user_tier(&env, user.clone()), UserTier::Novice);
-
-    // Add 99 volume - still Novice
-    portfolio.record_trade_with_amount(&env, user.clone(), 99);
-    assert_eq!(portfolio.get_user_tier(&env, user.clone()), UserTier::Novice);
-
-    // Add 1 more volume - becomes Trader (100 total)
-    portfolio.record_trade_with_amount(&env, user.clone(), 1);
-    assert_eq!(portfolio.get_user_tier(&env, user.clone()), UserTier::Trader);
-
-    // Add 899 more volume - still Trader (need 1000 total for Expert)
-    portfolio.record_trade_with_amount(&env, user.clone(), 899);
-    assert_eq!(portfolio.get_user_tier(&env, user.clone()), UserTier::Trader);
-
-    // Add 101 more volume - becomes Expert (1000 total)
-    portfolio.record_trade_with_amount(&env, user.clone(), 101);
-    assert_eq!(portfolio.get_user_tier(&env, user.clone()), UserTier::Expert);
-
-    // Add 9000 more volume - becomes Whale (10000 total)
-    portfolio.record_trade_with_amount(&env, user.clone(), 9000);
-    assert_eq!(portfolio.get_user_tier(&env, user.clone()), UserTier::Whale);
-}
-
-/// Test tier progression with both trades and volume
-#[test]
-fn test_tier_progression_combined() {
-    let env = Env::default();
-    let mut portfolio = Portfolio::new(&env);
-    let user = Address::generate(&env);
-
-    // Start as Novice
-    assert_eq!(portfolio.get_user_tier(&env, user.clone()), UserTier::Novice);
-
-    // Add 5 trades and 50 volume - still Novice
-    for _ in 0..5 {
-        portfolio.record_trade_with_amount(&env, user.clone(), 10);
-    }
-    assert_eq!(portfolio.get_user_tier(&env, user.clone()), UserTier::Novice);
-
-    // Add 5 more trades (10 total) - becomes Trader
-    portfolio.record_trade(&env, user.clone());
-    assert_eq!(portfolio.get_user_tier(&env, user.clone()), UserTier::Trader);
-
-    // Add 40 more trades but only 400 volume - still Trader (can't be Expert without 1000 volume)
-    for _ in 0..40 {
-        portfolio.record_trade_with_amount(&env, user.clone(), 10);
-    }
-    assert_eq!(portfolio.get_user_tier(&env, user.clone()), UserTier::Trader);
-
-    // Add volume to reach 1000 total
-    portfolio.record_trade_with_amount(&env, user.clone(), 100);
-    assert_eq!(portfolio.get_user_tier(&env, user.clone()), UserTier::Expert);
-}
-
-/// Test tier update functionality
-#[test]
-fn test_tier_update_functionality() {
-    let env = Env::default();
-    let mut portfolio = Portfolio::new(&env);
-    let user = Address::generate(&env);
-
-    // Start as Novice
-    let (initial_tier, changed) = portfolio.update_tier(&env, user.clone());
-    assert_eq!(initial_tier, UserTier::Novice);
-    assert_eq!(changed, false); // No change since it's the same
-
-    // Record trades to become Trader
-    for _ in 0..10 {
-        portfolio.record_trade(&env, user.clone());
-    }
-
-    let (new_tier, changed) = portfolio.update_tier(&env, user.clone());
-    assert_eq!(new_tier, UserTier::Trader);
-    assert_eq!(changed, true); // Tier changed
-
-    // Update again - should not change
-    let (same_tier, changed) = portfolio.update_tier(&env, user.clone());
-    assert_eq!(same_tier, UserTier::Trader);
-    assert_eq!(changed, false); // No change
-}
-
-/// Test that different users have independent tiers
-#[test]
-fn test_user_tier_isolation() {
-    let env = Env::default();
-    let mut portfolio = Portfolio::new(&env);
-    let user1 = Address::generate(&env);
-    let user2 = Address::generate(&env);
-
-    // Both start as Novice
-    assert_eq!(portfolio.get_user_tier(&env, user1.clone()), UserTier::Novice);
-    assert_eq!(portfolio.get_user_tier(&env, user2.clone()), UserTier::Novice);
-
-    // User1 becomes Trader
-    for _ in 0..10 {
-        portfolio.record_trade(&env, user1.clone());
-    }
-    assert_eq!(portfolio.get_user_tier(&env, user1.clone()), UserTier::Trader);
-    assert_eq!(portfolio.get_user_tier(&env, user2.clone()), UserTier::Novice); // User2 unchanged
-
-    // User2 becomes Expert
-    for _ in 0..50 {
-        portfolio.record_trade_with_amount(&env, user2.clone(), 20);
-    }
-    assert_eq!(portfolio.get_user_tier(&env, user1.clone()), UserTier::Trader);
-    assert_eq!(portfolio.get_user_tier(&env, user2.clone()), UserTier::Expert);
 }
