@@ -55,7 +55,33 @@ pub struct Portfolio {
     token_pairs_traded: Map<Address, Vec<Symbol>>, // unique token pairs per user
     ledger_heights_traded: Map<Address, Vec<u64>>, // ledger heights where user traded
     lp_deposits_count: Map<Address, u32>,  // number of LP deposits per user
+    transactions: Map<Address, Vec<Transaction>>, // transaction history
+
+    // LP Position Tracking
+    lp_positions: Map<Address, LPPosition>, // LP positions per user
+    total_lp_tokens: i128,                 // total LP tokens minted (for share calculations)
+    lp_fees_accumulated: i128,            // accumulated fees for LP distribution
+}
+
+#[derive(Clone, Debug, PartialEq)] // Added derives for testing
+#[contracttype]
+pub struct Transaction {
+    pub timestamp: u64,
+    pub from_token: Symbol,
+    pub to_token: Symbol,
+    pub from_amount: i128,
+    pub to_amount: i128,
+    pub rate_achieved: u128, // Represented with 7 decimals precision (units of 10^-7)
     pub migration_time: Option<u64>,      // Timestamp when V2 migration occurred
+}
+
+#[derive(Clone, Debug, PartialEq)]
+#[contracttype]
+pub struct LPPosition {
+    pub lp_address: Address,
+    pub xlm_deposited: i128,
+    pub usdc_deposited: i128,
+    pub lp_tokens_minted: i128,
 }
 
 impl Portfolio {
@@ -77,6 +103,10 @@ impl Portfolio {
             token_pairs_traded: Map::new(env),
             ledger_heights_traded: Map::new(env),
             lp_deposits_count: Map::new(env),
+            transactions: Map::new(env),
+            lp_positions: Map::new(env),
+            total_lp_tokens: 0,
+            lp_fees_accumulated: 0,
             migration_time: None,
         }
     }
@@ -134,7 +164,25 @@ impl Portfolio {
     }
 
 
-    /// Mint tokens (XLM or a custom token) to a user’s balance.
+    /// Debit tokens from a user's balance (for LP deposits, etc.)
+    pub fn debit(&mut self, env: &Env, token: Asset, from: Address, amount: i128) {
+        assert!(amount > 0, "Amount must be positive");
+        let key = (from.clone(), token.clone());
+        let current = self.balances.get(key.clone()).unwrap_or(0);
+        assert!(current >= amount, "Insufficient funds");
+        let new_balance = current - amount;
+        self.balances.set(key, new_balance);
+        
+        // Update PnL
+        let current_pnl = self.pnl.get(from.clone()).unwrap_or(0);
+        let new_pnl = current_pnl.saturating_sub(amount);
+        self.pnl.set(from.clone(), new_pnl);
+        
+        // Metrics
+        self.metrics.balances_updated = self.metrics.balances_updated.saturating_add(1);
+    }
+
+    /// Mint tokens (XLM or a custom token) to a user's balance.
     pub fn mint(&mut self, env: &Env, token: Asset, to: Address, amount: i128) {
         assert!(amount >= 0, "Amount must be non-negative");
 
@@ -557,6 +605,77 @@ impl Portfolio {
     /// Helper: Collect fees
     pub fn collect_fee(&mut self, fee_amount: i128) {
         self.total_fees_collected = self.total_fees_collected.saturating_add(fee_amount);
+    }
+
+    pub fn set_liquidity(&mut self, asset: Asset, amount: i128) {
+        match asset {
+            Asset::XLM => self.xlm_in_pool = amount,
+            Asset::Custom(sym) => {
+                if sym == symbol_short!("USDCSIM") {
+                    self.usdc_in_pool = amount;
+                }
+            }
+        }
+    }
+
+    pub fn get_liquidity(&self, asset: Asset) -> i128 {
+        match asset {
+            Asset::XLM => self.xlm_in_pool,
+            Asset::Custom(sym) => {
+                if sym == symbol_short!("USDCSIM") {
+                    self.usdc_in_pool
+                } else {
+                    0
+                }
+            }
+        }
+    }
+
+    // ===== LP POSITION MANAGEMENT =====
+
+    /// Get LP position for a user
+    pub fn get_lp_position(&self, user: Address) -> Option<LPPosition> {
+        self.lp_positions.get(user)
+    }
+
+    /// Set or update LP position for a user
+    pub fn set_lp_position(&mut self, user: Address, position: LPPosition) {
+        self.lp_positions.set(user, position);
+    }
+
+    /// Get total LP tokens minted
+    pub fn get_total_lp_tokens(&self) -> i128 {
+        self.total_lp_tokens
+    }
+
+    /// Add to total LP tokens (when minting)
+    pub fn add_total_lp_tokens(&mut self, amount: i128) {
+        self.total_lp_tokens = self.total_lp_tokens.saturating_add(amount);
+    }
+
+    /// Subtract from total LP tokens (when burning)
+    pub fn subtract_total_lp_tokens(&mut self, amount: i128) {
+        self.total_lp_tokens = self.total_lp_tokens.saturating_sub(amount);
+        if self.total_lp_tokens < 0 {
+            self.total_lp_tokens = 0;
+        }
+    }
+
+    /// Add accumulated fees for LP distribution
+    pub fn add_lp_fees(&mut self, amount: i128) {
+        self.lp_fees_accumulated = self.lp_fees_accumulated.saturating_add(amount);
+    }
+
+    /// Get accumulated LP fees
+    pub fn get_lp_fees_accumulated(&self) -> i128 {
+        self.lp_fees_accumulated
+    }
+
+    /// Get all LP positions (for get_lp_positions function)
+    pub fn get_all_lp_positions(&self, env: &Env) -> Vec<LPPosition> {
+        // Note: Map iteration is limited in Soroban, so we'll need to track LP users separately
+        // For now, return empty vec - we'll handle this differently in the contract
+        Vec::new(env)
     }
 }
 
