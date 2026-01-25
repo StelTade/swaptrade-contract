@@ -4,17 +4,38 @@ use soroban_sdk::{contract, contractimpl, Address, Env, Symbol, Vec};
 // Bring in modules from parent directory
 mod portfolio { include!("../portfolio.rs"); }
 mod trading { include!("../trading.rs"); }
+pub mod migration;
 
 use portfolio::{Portfolio, Asset};
 pub use portfolio::Badge;
 pub use portfolio::Metrics;
 use trading::perform_swap;
 
+pub const CONTRACT_VERSION: u32 = 1;
+
 #[contract]
 pub struct CounterContract;
 
 #[contractimpl]
 impl CounterContract {
+    /// Initialize the contract version. 
+    /// Should be called after deployment.
+    pub fn initialize(env: Env) {
+        if migration::get_stored_version(&env) == 0 {
+            env.storage().instance().set(&Symbol::short("v_code"), &CONTRACT_VERSION);
+        }
+    }
+
+    /// Get the current contract version from storage
+    pub fn get_contract_version(env: Env) -> u32 {
+        migration::get_stored_version(&env)
+    }
+
+    /// Migrate contract data from V1 to V2
+    pub fn migrate(env: Env) -> Result<(), u32> {
+        migration::migrate_from_v1_to_v2(&env)
+    }
+
     pub fn mint(env: Env, token: Symbol, to: Address, amount: i128) {
         let mut portfolio: Portfolio = env
             .storage()
@@ -185,5 +206,7 @@ impl CounterContract {
 
 #[cfg(test)]
 mod balance_test;
+#[cfg(test)]
+mod migration_tests;
 
 // trading tests are provided as integration/unit tests in the repository tests/ folder

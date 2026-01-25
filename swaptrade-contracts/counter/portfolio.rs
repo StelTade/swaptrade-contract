@@ -55,6 +55,7 @@ pub struct Portfolio {
     token_pairs_traded: Map<Address, Vec<Symbol>>, // unique token pairs per user
     ledger_heights_traded: Map<Address, Vec<u64>>, // ledger heights where user traded
     lp_deposits_count: Map<Address, u32>,  // number of LP deposits per user
+    pub migration_time: Option<u64>,      // Timestamp when V2 migration occurred
 }
 
 impl Portfolio {
@@ -76,6 +77,7 @@ impl Portfolio {
             token_pairs_traded: Map::new(env),
             ledger_heights_traded: Map::new(env),
             lp_deposits_count: Map::new(env),
+            migration_time: None,
         }
     }
 
