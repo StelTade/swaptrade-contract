@@ -5,6 +5,7 @@ use crate::oracle::{get_stored_price, ContractError};
 
 const PRECISION: u128 = 1_000_000_000_000_000_000; // 1e18
 const STALE_THRESHOLD_SECONDS: u64 = 600; // 10 minutes
+const LP_FEE_BPS: u128 = 30; // 0.3% = 30 basis points
 
 
 fn symbol_to_asset(sym: &Symbol) -> Option<Asset> {
@@ -74,50 +75,96 @@ pub fn perform_swap(
         _ => PRECISION,
     };
 
-    // 2. Theoretical Output
-    let amount_u128 = amount as u128;
-    let theoretical_out = (amount_u128 * price) / PRECISION;
+    // 2. Get current pool liquidity (from LP pool)
+    let xlm_liquidity = portfolio.get_liquidity(Asset::XLM);
+    let usdc_liquidity = portfolio.get_liquidity(Asset::Custom(symbol_short!("USDCSIM")));
 
-    // 3. Liquidity & Slippage
-    let liquidity_out = portfolio.get_liquidity(to_asset.clone()) as u128;
-    
-    let actual_out = if liquidity_out > 0 {
-        // Price impact = theoretical_out / liquidity
-        // Use u128 for calculation
-        let impact_bps = (theoretical_out * 10000) / liquidity_out;
-        
-        // Check max slippage
-        let max_slip = env.storage().instance().get(&symbol_short!("MAX_SLIP")).unwrap_or(10000u32); 
-        if impact_bps > max_slip as u128 {
-             panic!("Slippage exceeded: {} bps > {} bps", impact_bps, max_slip);
-        }
-        
-        // Apply slippage
-        // actual = theoretical * (1 - impact)
-        let slippage_amt = (theoretical_out * impact_bps) / 10000;
-        if slippage_amt >= theoretical_out {
-            0
-        } else {
-            theoretical_out - slippage_amt
-        }
+    // 3. Calculate swap output using constant product AMM formula: x * y = k
+    // With 0.3% fee: amount_out = (y * amount_in * (1 - fee)) / (x + amount_in * (1 - fee))
+    let amount_u128 = amount as u128;
+    let (reserve_in, reserve_out) = if from_asset == Asset::XLM {
+        (xlm_liquidity as u128, usdc_liquidity as u128)
     } else {
-        // If no liquidity set, assume infinite (no slippage)
-        theoretical_out
+        (usdc_liquidity as u128, xlm_liquidity as u128)
+    };
+
+    let actual_out = if reserve_in > 0 && reserve_out > 0 {
+        // Apply fee: amount_in_after_fee = amount_in * (1 - fee_bps / 10000)
+        let amount_in_after_fee = (amount_u128 * (10000 - LP_FEE_BPS)) / 10000;
+        
+        // Constant product formula: (x + dx) * (y - dy) = x * y
+        // dy = (y * dx) / (x + dx)
+        let numerator = reserve_out.saturating_mul(amount_in_after_fee);
+        let denominator = reserve_in.saturating_add(amount_in_after_fee);
+        
+        if denominator == 0 {
+            panic!("Division by zero in AMM calculation");
+        }
+        
+        numerator / denominator
+    } else {
+        // If no liquidity, use oracle price (fallback)
+        let price = match get_price_with_staleness_check(env, from.clone(), to.clone()) {
+            Ok(p) => p,
+            Err(ContractError::StalePrice) => panic!("Oracle price is stale"),
+            Err(ContractError::InvalidPrice) => panic!("Oracle price is invalid"),
+            Err(ContractError::PriceNotSet) => PRECISION, // Fallback to 1:1
+            _ => PRECISION,
+        };
+        (amount_u128 * price) / PRECISION
     };
 
     let out_amount = actual_out as i128;
+    assert!(out_amount > 0, "Output amount must be positive");
 
-    // 4. Update Portfolio (User Balances)
+    // 4. Calculate fee amount (0.3% of input)
+    let fee_amount = (amount_u128 * LP_FEE_BPS) / 10000;
+    let fee_amount_i128 = fee_amount as i128;
+
+    // 5. Check slippage protection
+    let theoretical_out = if reserve_in > 0 && reserve_out > 0 {
+        // Theoretical output without fee
+        let numerator = reserve_out.saturating_mul(amount_u128);
+        let denominator = reserve_in.saturating_add(amount_u128);
+        if denominator == 0 {
+            amount_u128 // Fallback
+        } else {
+            numerator / denominator
+        }
+    } else {
+        amount_u128 // Fallback to 1:1
+    };
+
+    let max_slip = env.storage().instance().get(&symbol_short!("MAX_SLIP")).unwrap_or(10000u32);
+    if theoretical_out > 0 {
+        let slippage_bps = ((theoretical_out - actual_out) * 10000) / theoretical_out;
+        if slippage_bps > max_slip as u128 {
+            panic!("Slippage exceeded: {} bps > {} bps", slippage_bps, max_slip);
+        }
+    }
+
+    // 6. Update Portfolio (User Balances) - transfer from user
     portfolio.transfer_asset(env, from_asset.clone(), to_asset.clone(), user.clone(), amount);
     
-    // 5. Update Pool Liquidity (Virtual)
-    // Only update if liquidity was set (simulated)
-    if liquidity_out > 0 {
-         let new_liq_out = (liquidity_out - actual_out) as i128;
-         portfolio.set_liquidity(to_asset.clone(), new_liq_out);
-         
-         let liquidity_in = portfolio.get_liquidity(from_asset.clone());
-         portfolio.set_liquidity(from_asset, liquidity_in + amount);
+    // 7. Update Pool Liquidity using constant product AMM
+    // Add input amount (minus fee) to reserve_in, subtract output from reserve_out
+    if reserve_in > 0 && reserve_out > 0 {
+        let amount_in_after_fee = amount - fee_amount_i128;
+        
+        if from_asset == Asset::XLM {
+            portfolio.set_liquidity(Asset::XLM, xlm_liquidity.saturating_add(amount_in_after_fee));
+            portfolio.set_liquidity(Asset::Custom(symbol_short!("USDCSIM")), usdc_liquidity.saturating_sub(out_amount));
+        } else {
+            portfolio.set_liquidity(Asset::Custom(symbol_short!("USDCSIM")), usdc_liquidity.saturating_add(amount_in_after_fee));
+            portfolio.set_liquidity(Asset::XLM, xlm_liquidity.saturating_sub(out_amount));
+        }
+    }
+
+    // 8. Collect and attribute fees to LPs
+    if fee_amount_i128 > 0 {
+        portfolio.add_lp_fees(fee_amount_i128);
+        // Fees are accumulated and can be distributed proportionally to LPs based on their LP token share
+        // This is tracked in lp_fees_accumulated for future distribution
     }
 
     out_amount
