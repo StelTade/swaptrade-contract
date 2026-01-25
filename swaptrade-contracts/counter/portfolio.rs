@@ -103,6 +103,31 @@ impl Portfolio {
 
     /// Transfer a user's balance from one asset to another.
     /// Fails if amount <= 0 or if the user has insufficient funds in the source asset.
+    pub fn debit(&mut self, env: &Env, token: Asset, user: Address, amount: i128) {
+        if amount == 0 { return; }
+        assert!(amount > 0, "Amount must be positive");
+        let key = (user.clone(), token.clone());
+        let current = self.balances.get(key.clone()).unwrap_or(0);
+        assert!(current >= amount, "Insufficient funds");
+        self.balances.set(key, current - amount);
+        
+        // Metrics
+        self.metrics.balances_updated = self.metrics.balances_updated.saturating_add(1);
+    }
+
+    pub fn credit(&mut self, env: &Env, token: Asset, user: Address, amount: i128) {
+        if amount == 0 { return; }
+        assert!(amount > 0, "Amount must be positive");
+        let key = (user.clone(), token.clone());
+        let current = self.balances.get(key.clone()).unwrap_or(0);
+        self.balances.set(key, current + amount);
+        
+        // Metrics
+        self.metrics.balances_updated = self.metrics.balances_updated.saturating_add(1);
+    }
+
+    /// Transfer a user's balance from one asset to another.
+    /// Fails if amount <= 0 or if the user has insufficient funds in the source asset.
     pub fn transfer_asset(
         &mut self,
         env: &Env,
@@ -111,23 +136,8 @@ impl Portfolio {
         user: Address,
         amount: i128,
     ) {
-        assert!(amount > 0, "Amount must be positive");
-
-        // Debit from source asset
-    let from_key = (user.clone(), from_token.clone());
-    let from_balance = self.balances.get(from_key.clone()).unwrap_or(0);
-        assert!(from_balance >= amount, "Insufficient funds");
-    let new_from = from_balance - amount;
-    self.balances.set(from_key, new_from);
-
-        // Credit to destination asset
-    let to_key = (user.clone(), to_token.clone());
-    let to_balance = self.balances.get(to_key.clone()).unwrap_or(0);
-    let new_to = to_balance + amount;
-    self.balances.set(to_key, new_to);
-
-        // Metrics: two balance updates (debit and credit)
-        self.metrics.balances_updated = self.metrics.balances_updated.saturating_add(2);
+        self.debit(env, from_token.clone(), user.clone(), amount);
+        self.credit(env, to_token.clone(), user.clone(), amount);
 
         // Optional structured logging
         #[cfg(feature = "logging")]
@@ -135,7 +145,7 @@ impl Portfolio {
             use soroban_sdk::symbol_short;
             env.events().publish(
                 (symbol_short!("transfer_asset"), user.clone()),
-                (from_token, to_key.1, amount),
+                (from_token, to_token, amount),
             );
         }
     }
