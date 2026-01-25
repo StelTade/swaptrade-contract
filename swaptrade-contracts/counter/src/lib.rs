@@ -6,6 +6,7 @@ mod rewards;
 mod rate_limit;
 mod emergency;
 mod validation;
+pub mod errors;
 
 // defined in events mod
 mod portfolio { include!("../portfolio.rs"); }
@@ -141,6 +142,15 @@ impl CounterContract {
 
         // Collect the fee
         if fee_amount > 0 {
+            // Deduct from user
+            let fee_asset = if from == symbol_short!("XLM") {
+                Asset::XLM
+            } else {
+                Asset::Custom(from.clone())
+            };
+            
+            // We need to use a mutable borrow of portfolio which we already have
+            portfolio.debit(&env, fee_asset, user.clone(), fee_amount);
             portfolio.collect_fee(fee_amount);
         }
 
