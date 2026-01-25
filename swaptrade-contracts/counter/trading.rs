@@ -145,6 +145,11 @@ pub fn perform_swap(
 
     // 6. Update Portfolio (User Balances) - transfer from user
     portfolio.transfer_asset(env, from_asset.clone(), to_asset.clone(), user.clone(), amount);
+    // 4. Update Portfolio (User Balances)
+    // Debit input Amount
+    portfolio.debit(env, from_asset.clone(), user.clone(), amount);
+    // Credit output Amount (calculated by AMM/Oracle)
+    portfolio.credit(env, to_asset.clone(), user.clone(), out_amount);
     
     // 7. Update Pool Liquidity using constant product AMM
     // Add input amount (minus fee) to reserve_in, subtract output from reserve_out

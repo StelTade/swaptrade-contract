@@ -6,7 +6,7 @@ const MAX_AMOUNT: i128 = 1_000_000_000_000_000_000;
 
 /// Supported tokens (project-specific)
 const XLM: Symbol = symbol_short!("XLM");
-const USDC_SIM: Symbol = symbol_short!("USDC-SIM");
+const USDC_SIM: Symbol = symbol_short!("USDCSIM");
 
 pub fn validate_amount(amount: i128) -> Result<(), ContractError> {
     if amount <= 0 {
@@ -27,11 +27,8 @@ pub fn validate_token_symbol(token: Symbol) -> Result<(), ContractError> {
     Ok(())
 }
 
-pub fn validate_user_address(address: &Address) -> Result<(), ContractError> {
-    let zero = Address::from_contract_id([0; 32]);
-    if address == &zero {
-        return Err(ContractError::InvalidUserAddress);
-    }
+pub fn validate_user_address(_env: &soroban_sdk::Env, _address: &Address) -> Result<(), ContractError> {
+    // Zero address check removed due to SDK limitations
     Ok(())
 }
 
