@@ -1,7 +1,8 @@
 #![cfg(test)]
 
 use super::*;
-use soroban_sdk::{symbol_short, Address, Env, Symbol};
+use soroban_sdk::{symbol_short, Address, Env};
+use soroban_sdk::testutils::Address as _;
 
 #[test]
 fn test_get_balance_returns_zero_for_new_user() {
@@ -211,13 +212,13 @@ fn test_metrics_increment_on_mint_and_swap() {
 
     let user = Address::generate(&env);
     let xlm = symbol_short!("XLM");
-    let usdc = symbol_short!("USDC-SIM");
+    let usdc = symbol_short!("USDCSIM");
 
     // Mint and check balances
     client.mint(&xlm, &user, &1000);
     assert_eq!(client.get_balance(&xlm, &user), 1000);
 
-    // Swap XLM -> USDC-SIM
+    // Swap XLM -> USDCSIM
     let out = client.swap(&xlm, &usdc, &500, &user);
     assert_eq!(out, 500);
 
@@ -235,19 +236,19 @@ fn test_try_swap_counts_failed_orders_without_panic() {
 
     let user = Address::generate(&env);
     let xlm = symbol_short!("XLM");
-    let usdc = symbol_short!("USDC-SIM");
+    let usdc = symbol_short!("USDCSIM");
 
     // Fail: same token pair
-    let out_same = client.try_swap(&xlm, &xlm, &100, &user);
+    let out_same = client.safe_swap(&xlm, &xlm, &100, &user);
     assert_eq!(out_same, 0);
 
     // Fail: invalid token
     let btc = symbol_short!("BTC");
-    let out_bad_token = client.try_swap(&xlm, &btc, &100, &user);
+    let out_bad_token = client.safe_swap(&xlm, &btc, &100, &user);
     assert_eq!(out_bad_token, 0);
 
     // Fail: negative amount
-    let out_neg = client.try_swap(&xlm, &usdc, &-10, &user);
+    let out_neg = client.safe_swap(&xlm, &usdc, &-10, &user);
     assert_eq!(out_neg, 0);
 
     // Metrics reflect failed orders

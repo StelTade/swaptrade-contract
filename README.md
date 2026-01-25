@@ -16,6 +16,26 @@ The contracts replicate key features of real-world cryptocurrency trading in a *
 - **Stellar SDK** for frontend/backend integration  
 - **Soroban CLI** for contract deployment and testing  
 
+## Emergency Pause & Recovery
+
+### Emergency Controls
+- `emergency_pause(admin)`
+- `emergency_unpause(admin)`
+- `freeze_user(admin, user)`
+- `unfreeze_user(admin, user)`
+- `snapshot_state()`
+
+### Circuit Breaker
+The contract auto-pauses when swap volume exceeds configured threshold.
+
+### Recovery
+1. Investigate issue
+2. Pause contract
+3. Freeze affected accounts
+4. Snapshot state
+5. Fix & restore
+
+
 ## Repository Structure
 swaptrade-contracts/
 │── Cargo.toml # Rust dependencies

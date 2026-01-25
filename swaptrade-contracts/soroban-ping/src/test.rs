@@ -10,9 +10,5 @@ fn test_ping() {
     let client = PingContractClient::new(&env, &contract_id);
 
     let pong = client.ping();
-    assert_eq!(
-        pong,
-        String::from_str(&env, "pong")
-    );
+    assert_eq!(pong, String::from_str(&env, "pong"));
 }
-

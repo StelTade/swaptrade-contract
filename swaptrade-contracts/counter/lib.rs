@@ -6,6 +6,7 @@ pub use portfolio::Badge;
 mod trading;
 use trading::perform_swap;
 mod referral;
+mod rewards;
 use referral::ReferralSystem;
 
 #[contract]
@@ -64,7 +65,7 @@ impl CounterContract {
         let out_amount = perform_swap(&env, &mut portfolio, from, to, amount, user.clone());
 
         // record trade and persist state
-        portfolio.record_trade(&env, user);
+        portfolio.record_trade_with_amount(&env, user, amount);
         env.storage().instance().set(&(), &portfolio);
 
         out_amount
@@ -299,6 +300,16 @@ impl CounterContract {
         rewards
     }
 }
+
+// counter/src/lib.rs
+mod trading;
+mod portfolio;
+mod errors;
+
+pub use trading::swap_tokens;
+pub use portfolio::{get_balance, deposit, withdraw};
+pub use errors::ContractError;
+
 
 #[cfg(test)]
 mod balance_test;

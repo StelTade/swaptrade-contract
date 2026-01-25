@@ -29,6 +29,8 @@ mod dashboard_query_tests {
             1000,
         );
         
+        portfolio.record_trade_with_amount(&env, user1, 1000);
+        
         assert_eq!(portfolio.get_total_trading_volume(), 1000);
     }
 
@@ -112,12 +114,15 @@ mod dashboard_query_tests {
         
         portfolio.mint(&env, Asset::XLM, user1.clone(), swap1);
         portfolio.transfer_asset(&env, Asset::XLM, Asset::Custom(soroban_sdk::symbol_short!("USDC")), user1, swap1);
+        portfolio.record_trade_with_amount(&env, user1, swap1);
         
         portfolio.mint(&env, Asset::XLM, user2.clone(), swap2);
         portfolio.transfer_asset(&env, Asset::XLM, Asset::Custom(soroban_sdk::symbol_short!("USDC")), user2, swap2);
+        portfolio.record_trade_with_amount(&env, user2, swap2);
         
         portfolio.mint(&env, Asset::XLM, user3.clone(), swap3);
         portfolio.transfer_asset(&env, Asset::XLM, Asset::Custom(soroban_sdk::symbol_short!("USDC")), user3, swap3);
+        portfolio.record_trade_with_amount(&env, user3, swap3);
         
         let expected_total = swap1 + swap2 + swap3;
         assert_eq!(portfolio.get_total_trading_volume(), expected_total);
@@ -132,6 +137,7 @@ mod dashboard_query_tests {
         let user = TestAddress::generate(&env);
         portfolio.mint(&env, Asset::XLM, user.clone(), 5000);
         portfolio.transfer_asset(&env, Asset::XLM, Asset::Custom(soroban_sdk::symbol_short!("USDC")), user, 2000);
+        portfolio.record_trade_with_amount(&env, user, 2000);
         
         let vol1 = portfolio.get_total_trading_volume();
         let vol2 = portfolio.get_total_trading_volume();
