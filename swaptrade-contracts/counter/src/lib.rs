@@ -552,6 +552,8 @@ mod rate_limit_tests;
 mod transaction_tests;
 #[cfg(test)]
 mod lp_tests;
+#[cfg(test)]
+mod enhanced_trading_tests;  // NEW: Enhanced trading tests for better coverage
 mod migration_tests;
 
 // trading tests are provided as integration/unit tests in the repository tests/ folder
