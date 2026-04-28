@@ -77,6 +77,11 @@ pub enum SwapTradeError {
 
     // ── Emergency / circuit-breaker ─────────────────────────────────────────
     NotEmergencyAdmin = 700,
+
+    // ── Referral system ─────────────────────────────────────────────────────
+    SelfReferral = 800,
+    AlreadyReferred = 801,
+    CircularReferral = 802,
 }
 
 /// Alias kept for modules that still import `ContractError` by name.

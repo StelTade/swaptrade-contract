@@ -21,6 +21,7 @@ mod state_snapshot;
 #[cfg(test)]
 mod state_snapshot_tests;
 mod storage;
+mod referral_system;
 mod batch {
     include!("../batch.rs");
 }
@@ -392,6 +393,9 @@ impl CounterContract {
             // We need to use a mutable borrow of portfolio which we already have
             portfolio.debit(&env, fee_asset, user.clone(), fee_amount);
             portfolio.collect_fee(fee_amount);
+
+            // Distribute referral commissions
+            crate::referral_system::calculate_and_distribute_commission(&env, user.clone(), fee_amount);
         }
 
         let out_amount = perform_swap(
@@ -1341,6 +1345,28 @@ impl CounterContract {
     /// Get governance override details
     pub fn kyc_get_override(env: Env, override_id: u64) -> Option<GovernanceOverride> {
         kyc::KYCSystem::get_override(&env, override_id)
+    }
+
+    // ── Referral System ─────────────────────────────────────────────────────
+
+    /// Register a referral relationship
+    pub fn register_referral(env: Env, referrer: Address, referred: Address) -> Result<(), ContractError> {
+        referral_system::register_referral(&env, referrer, referred)
+    }
+
+    /// Get referral statistics for a user
+    pub fn get_referral_stats(env: Env, user: Address) -> referral_system::ReferralStats {
+        referral_system::get_referral_stats(&env, user)
+    }
+
+    /// Get commission balance for a user
+    pub fn get_commission_balance(env: Env, user: Address) -> i128 {
+        referral_system::get_commission_balance(&env, user)
+    }
+
+    /// Withdraw accumulated commission
+    pub fn withdraw_commission(env: Env, user: Address) -> i128 {
+        referral_system::withdraw_commission(&env, user)
     }
 }
 
