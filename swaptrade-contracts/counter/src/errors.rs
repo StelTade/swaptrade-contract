@@ -77,6 +77,26 @@ pub enum SwapTradeError {
 
     // ── Emergency / circuit-breaker ─────────────────────────────────────────
     NotEmergencyAdmin = 700,
+
+    // ── Risk Management ─────────────────────────────────────────────────────
+    RiskLimitExceeded = 800,
+    ConcentrationLimitExceeded = 801,
+    PositionLimitExceeded = 802,
+    CircuitBreakerTripped = 803,
+    InvalidRiskConfig = 804,
+
+    // ── Governance ───────────────────────────────────────────────────────────
+    ProposalNotFound = 900,
+    ProposalNotActive = 901,
+    VotingPeriodEnded = 902,
+    AlreadyVoted = 903,
+    InsufficientVotingPower = 904,
+    QuorumNotReached = 905,
+    ProposalNotPassed = 906,
+    ProposalAlreadyExecuted = 907,
+    ExecutionDelayNotElapsed = 908,
+    InvalidProposalType = 909,
+    ProposalCooldownActive = 910,
 }
 
 /// Alias kept for modules that still import `ContractError` by name.
