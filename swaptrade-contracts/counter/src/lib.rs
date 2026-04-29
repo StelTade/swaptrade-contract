@@ -44,6 +44,8 @@ mod analytics_dashboard_tests;
 mod oracle_adapter_tests;
 #[cfg(test)]
 mod multihop_swap_tests;
+mod governance_types;
+mod governance_system;
 mod governance_params;
 mod nonce;
 mod risk_management;
@@ -1498,6 +1500,93 @@ impl CounterContract {
     }
 
     // ────────────────────────────────────────────────────────────────────────
+    // On-Chain Governance System
+    // ────────────────────────────────────────────────────────────────────────
+
+    /// Create a new governance proposal
+    pub fn create_governance_proposal(
+        env: Env,
+        proposer: Address,
+        proposal_type: governance_types::ProposalType,
+        description: Symbol,
+        voting_period: u64,
+    ) -> Result<u64, SwapTradeError> {
+        governance_system::GovernanceSystem::create_proposal(
+            &env,
+            &proposer,
+            proposal_type,
+            description,
+            voting_period,
+        )
+    }
+
+    /// Cast a vote on a governance proposal
+    pub fn cast_governance_vote(
+        env: Env,
+        voter: Address,
+        proposal_id: u64,
+        vote_option: governance_types::VoteOption,
+    ) -> Result<(), SwapTradeError> {
+        governance_system::GovernanceSystem::cast_vote(&env, &voter, proposal_id, vote_option)
+    }
+
+    /// Execute a passed governance proposal
+    pub fn execute_governance_proposal(
+        env: Env,
+        executor: Address,
+        proposal_id: u64,
+    ) -> Result<(), SwapTradeError> {
+        governance_system::GovernanceSystem::execute_proposal(&env, &executor, proposal_id)
+    }
+
+    /// Cancel a governance proposal (only by proposer)
+    pub fn cancel_governance_proposal(
+        env: Env,
+        canceller: Address,
+        proposal_id: u64,
+    ) -> Result<(), SwapTradeError> {
+        governance_system::GovernanceSystem::cancel_proposal(&env, &canceller, proposal_id)
+    }
+
+    /// Get governance proposal details
+    pub fn get_governance_proposal(
+        env: Env,
+        proposal_id: u64,
+    ) -> Result<governance_types::Proposal, SwapTradeError> {
+        governance_system::GovernanceSystem::get_proposal(&env, proposal_id)
+    }
+
+    /// Get votes for a governance proposal
+    pub fn get_governance_proposal_votes(
+        env: Env,
+        proposal_id: u64,
+    ) -> soroban_sdk::Map<Address, governance_types::Vote> {
+        governance_system::GovernanceSystem::get_proposal_votes(&env, proposal_id)
+    }
+
+    /// Get governance configuration
+    pub fn get_governance_config(env: Env) -> governance_types::GovernanceConfig {
+        governance_system::GovernanceSystem::get_config(&env)
+    }
+
+    /// Set governance configuration (admin only)
+    pub fn set_governance_config(
+        env: Env,
+        admin: Address,
+        config: governance_types::GovernanceConfig,
+    ) -> Result<(), SwapTradeError> {
+        governance_system::GovernanceSystem::set_config(&env, &admin, &config)
+    }
+
+    /// Get voting power for an address
+    pub fn get_voting_power(env: Env, voter: Address) -> u128 {
+        // For now, voting power is based on staked tokens
+        crate::staking_bonus::StakingBonusManager::get_user_total_staked(&env, voter.clone()) as u128
+    }
+
+    /// Get total voting power in the system
+    pub fn get_total_voting_power(env: Env) -> u128 {
+        crate::staking_bonus::StakingBonusManager::get_total_staked(&env) as u128
     // Risk Management System
     // ────────────────────────────────────────────────────────────────────────
 
@@ -1653,5 +1742,5 @@ impl CounterContract {
 
 #[cfg(all(test, feature = "experimental"))]
 mod migration_tests;
-
-// trading tests are provided as integration/unit tests in the repository tests/ folder
+mod risk_management_tests;
+mod governance_tests;
