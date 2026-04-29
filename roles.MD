@@ -101,3 +101,26 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
+
+use std::time::Instant;
+use std::collections::HashMap;
+use std::fs::File;
+use std::io::Write;
+use serde_json::Value;
+
+mod performance_benchmark;
+use performance_benchmark::{run_benchmarks, BenchmarkRunner, BenchmarkResult};
+
+/// Configuration for the benchmark runner
+struct BenchmarkConfig {
+    iterations: usize,
+    warmup_runs: usize,
+    output_format: OutputFormat,
+}
+
+#[derive(Debug)]
+enum OutputFormat {
+    Console,
+    Json,
+    Csv,
+}
