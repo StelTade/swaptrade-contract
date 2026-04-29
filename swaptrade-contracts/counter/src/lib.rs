@@ -726,18 +726,71 @@ impl CounterContract {
     // ===== BATCH OPERATIONS =====
 
     pub fn execute_batch_atomic(env: Env, operations: Vec<BatchOperation>) -> BatchResult {
+        // Validate batch operations are not empty
+        if operations.is_empty() {
+            let mut result = BatchResult::new(&env);
+            result.operations_failed = 1;
+            return result;
+        }
+
+        // Extract caller from first operation for authentication and rate limiting
+        let caller = match operations.get(0) {
+            Some(BatchOperation::Swap(_, _, _, user)) 
+            | Some(BatchOperation::AddLiquidity(_, _, user))
+            | Some(BatchOperation::RemoveLiquidity(_, _, user)) => Some(user.clone()),
+            Some(BatchOperation::MintToken(_, _, _)) => None,
+            _ => None,
+        };
+
+        // Require authentication from the caller
+        if let Some(caller_addr) = &caller {
+            caller_addr.require_auth();
+            if let Err(_) = require_verified_user(&env, caller_addr) {
+                let mut result = BatchResult::new(&env);
+                result.operations_failed = 1;
+                return result;
+            }
+        }
+
         let mut portfolio: Portfolio = env
             .storage()
             .instance()
             .get(&())
             .unwrap_or_else(|| Portfolio::new(&env));
 
-        let result = execute_batch_atomic(&env, &mut portfolio, operations);
+        // Check rate limiting for batch operations with swaps
+        if let Some(caller_addr) = &caller {
+            let user_tier = portfolio.get_user_tier(&env, caller_addr.clone());
+            // Count swap operations in batch
+            let swap_count = operations.iter().filter(|op| matches!(op, BatchOperation::Swap(_, _, _, _))).count();
+            if swap_count > 0 {
+                // Apply rate limit check for batch swaps
+                if RateLimiter::check_swap_limit(&env, caller_addr, &user_tier).is_err() {
+                    let mut result = BatchResult::new(&env);
+                    result.operations_failed = 1;
+                    return result;
+                }
+            }
+        }
+
+        let result = execute_batch_atomic(&env, &mut portfolio, operations.clone());
 
         match result {
             Ok(res) => {
                 env.storage().instance().set(&(), &portfolio);
+                
+                // Record rate limit usage for executed swaps
+                if let Some(caller_addr) = &caller {
+                    let swap_count = operations.iter().filter(|op| matches!(op, BatchOperation::Swap(_, _, _, _))).count();
+                    if swap_count > 0 && res.operations_executed > 0 {
+                        for _ in 0..res.operations_executed {
+                            RateLimiter::record_swap_op(&env, caller_addr, env.ledger().timestamp());
+                        }
+                    }
+                }
+
                 crate::events::Events::flush_badge_events(&env);
+                invalidate_query_cache(&env);
                 res
             }
             Err(_) => {
@@ -749,18 +802,71 @@ impl CounterContract {
     }
 
     pub fn execute_batch_best_effort(env: Env, operations: Vec<BatchOperation>) -> BatchResult {
+        // Validate batch operations are not empty
+        if operations.is_empty() {
+            let mut result = BatchResult::new(&env);
+            result.operations_failed = 1;
+            return result;
+        }
+
+        // Extract caller from first operation for authentication and rate limiting
+        let caller = match operations.get(0) {
+            Some(BatchOperation::Swap(_, _, _, user)) 
+            | Some(BatchOperation::AddLiquidity(_, _, user))
+            | Some(BatchOperation::RemoveLiquidity(_, _, user)) => Some(user.clone()),
+            Some(BatchOperation::MintToken(_, _, _)) => None,
+            _ => None,
+        };
+
+        // Require authentication from the caller
+        if let Some(caller_addr) = &caller {
+            caller_addr.require_auth();
+            if let Err(_) = require_verified_user(&env, caller_addr) {
+                let mut result = BatchResult::new(&env);
+                result.operations_failed = 1;
+                return result;
+            }
+        }
+
         let mut portfolio: Portfolio = env
             .storage()
             .instance()
             .get(&())
             .unwrap_or_else(|| Portfolio::new(&env));
 
-        let result = execute_batch_best_effort(&env, &mut portfolio, operations);
+        // Check rate limiting for batch operations with swaps
+        if let Some(caller_addr) = &caller {
+            let user_tier = portfolio.get_user_tier(&env, caller_addr.clone());
+            // Count swap operations in batch
+            let swap_count = operations.iter().filter(|op| matches!(op, BatchOperation::Swap(_, _, _, _))).count();
+            if swap_count > 0 {
+                // Apply rate limit check for batch swaps
+                if RateLimiter::check_swap_limit(&env, caller_addr, &user_tier).is_err() {
+                    let mut result = BatchResult::new(&env);
+                    result.operations_failed = 1;
+                    return result;
+                }
+            }
+        }
+
+        let result = execute_batch_best_effort(&env, &mut portfolio, operations.clone());
 
         match result {
             Ok(res) => {
                 env.storage().instance().set(&(), &portfolio);
+                
+                // Record rate limit usage for executed swaps
+                if let Some(caller_addr) = &caller {
+                    let swap_count = operations.iter().filter(|op| matches!(op, BatchOperation::Swap(_, _, _, _))).count();
+                    if swap_count > 0 && res.operations_executed > 0 {
+                        for _ in 0..res.operations_executed {
+                            RateLimiter::record_swap_op(&env, caller_addr, env.ledger().timestamp());
+                        }
+                    }
+                }
+
                 crate::events::Events::flush_badge_events(&env);
+                invalidate_query_cache(&env);
                 res
             }
             Err(_) => {
@@ -1159,28 +1265,36 @@ impl CounterContract {
     /// Supports: 30, 60, 90, or 365-day stakes
     pub fn stake(env: Env, user: Address, amount: i128, duration_days: u32) -> Result<u32, ContractError> {
         require_authenticated_verified_user(&env, &user)?;
-        StakingBonusManager::stake(&env, user, amount, duration_days)
+        let result = StakingBonusManager::stake(&env, user, amount, duration_days)?;
+        invalidate_query_cache(&env);
+        Ok(result)
     }
 
     /// Claim earned staking bonuses (after 30-day holding period)
     /// Returns total bonuses claimed
     pub fn claim_staking_bonuses(env: Env, user: Address) -> Result<i128, ContractError> {
         require_authenticated_verified_user(&env, &user)?;
-        StakingBonusManager::claim_bonuses(&env, user)
+        let result = StakingBonusManager::claim_bonuses(&env, user)?;
+        invalidate_query_cache(&env);
+        Ok(result)
     }
 
     /// Claim staked principal after lock period expires
     /// Returns the principal amount
     pub fn claim_stake(env: Env, user: Address, stake_id: u32) -> Result<i128, ContractError> {
         require_authenticated_verified_user(&env, &user)?;
-        StakingBonusManager::claim_stake(&env, user, stake_id)
+        let result = StakingBonusManager::claim_stake(&env, user, stake_id)?;
+        invalidate_query_cache(&env);
+        Ok(result)
     }
 
     /// Unstake early before lock period (incurs 10% penalty)
     /// Returns (principal_after_penalty, penalty_amount)
     pub fn unstake_early(env: Env, user: Address, stake_id: u32) -> Result<(i128, i128), ContractError> {
         require_authenticated_verified_user(&env, &user)?;
-        StakingBonusManager::unstake_early(&env, user, stake_id)
+        let result = StakingBonusManager::unstake_early(&env, user, stake_id)?;
+        invalidate_query_cache(&env);
+        Ok(result)
     }
 
     /// Get all stake records for a user (transparent view)
