@@ -21,6 +21,7 @@ mod state_snapshot;
 #[cfg(test)]
 mod state_snapshot_tests;
 mod storage;
+mod referral_system;
 mod batch {
     include!("../batch.rs");
 }
@@ -434,6 +435,9 @@ impl CounterContract {
             // We need to use a mutable borrow of portfolio which we already have
             portfolio.debit(&env, fee_asset, user.clone(), fee_amount);
             portfolio.collect_fee(fee_amount);
+
+            // Distribute referral commissions
+            crate::referral_system::calculate_and_distribute_commission(&env, user.clone(), fee_amount);
         }
 
         let out_amount = perform_swap(
@@ -1499,244 +1503,26 @@ impl CounterContract {
         kyc::KYCSystem::get_override(&env, override_id)
     }
 
-    // ────────────────────────────────────────────────────────────────────────
-    // On-Chain Governance System
-    // ────────────────────────────────────────────────────────────────────────
+    // ── Referral System ─────────────────────────────────────────────────────
 
-    /// Create a new governance proposal
-    pub fn create_governance_proposal(
-        env: Env,
-        proposer: Address,
-        proposal_type: governance_types::ProposalType,
-        description: Symbol,
-        voting_period: u64,
-    ) -> Result<u64, SwapTradeError> {
-        governance_system::GovernanceSystem::create_proposal(
-            &env,
-            &proposer,
-            proposal_type,
-            description,
-            voting_period,
-        )
+    /// Register a referral relationship
+    pub fn register_referral(env: Env, referrer: Address, referred: Address) -> Result<(), ContractError> {
+        referral_system::register_referral(&env, referrer, referred)
     }
 
-    /// Cast a vote on a governance proposal
-    pub fn cast_governance_vote(
-        env: Env,
-        voter: Address,
-        proposal_id: u64,
-        vote_option: governance_types::VoteOption,
-    ) -> Result<(), SwapTradeError> {
-        governance_system::GovernanceSystem::cast_vote(&env, &voter, proposal_id, vote_option)
+    /// Get referral statistics for a user
+    pub fn get_referral_stats(env: Env, user: Address) -> referral_system::ReferralStats {
+        referral_system::get_referral_stats(&env, user)
     }
 
-    /// Execute a passed governance proposal
-    pub fn execute_governance_proposal(
-        env: Env,
-        executor: Address,
-        proposal_id: u64,
-    ) -> Result<(), SwapTradeError> {
-        governance_system::GovernanceSystem::execute_proposal(&env, &executor, proposal_id)
+    /// Get commission balance for a user
+    pub fn get_commission_balance(env: Env, user: Address) -> i128 {
+        referral_system::get_commission_balance(&env, user)
     }
 
-    /// Cancel a governance proposal (only by proposer)
-    pub fn cancel_governance_proposal(
-        env: Env,
-        canceller: Address,
-        proposal_id: u64,
-    ) -> Result<(), SwapTradeError> {
-        governance_system::GovernanceSystem::cancel_proposal(&env, &canceller, proposal_id)
-    }
-
-    /// Get governance proposal details
-    pub fn get_governance_proposal(
-        env: Env,
-        proposal_id: u64,
-    ) -> Result<governance_types::Proposal, SwapTradeError> {
-        governance_system::GovernanceSystem::get_proposal(&env, proposal_id)
-    }
-
-    /// Get votes for a governance proposal
-    pub fn get_governance_proposal_votes(
-        env: Env,
-        proposal_id: u64,
-    ) -> soroban_sdk::Map<Address, governance_types::Vote> {
-        governance_system::GovernanceSystem::get_proposal_votes(&env, proposal_id)
-    }
-
-    /// Get governance configuration
-    pub fn get_governance_config(env: Env) -> governance_types::GovernanceConfig {
-        governance_system::GovernanceSystem::get_config(&env)
-    }
-
-    /// Set governance configuration (admin only)
-    pub fn set_governance_config(
-        env: Env,
-        admin: Address,
-        config: governance_types::GovernanceConfig,
-    ) -> Result<(), SwapTradeError> {
-        governance_system::GovernanceSystem::set_config(&env, &admin, &config)
-    }
-
-    /// Get voting power for an address
-    pub fn get_voting_power(env: Env, voter: Address) -> u128 {
-        // For now, voting power is based on staked tokens
-        crate::staking_bonus::StakingBonusManager::get_user_total_staked(&env, voter.clone()) as u128
-    }
-
-    /// Get total voting power in the system
-    pub fn get_total_voting_power(env: Env) -> u128 {
-        crate::staking_bonus::StakingBonusManager::get_total_staked(&env) as u128
-    // Risk Management System
-    // ────────────────────────────────────────────────────────────────────────
-
-    /// Get comprehensive risk metrics for a user
-    /// Returns exposure, risk scores, and position analysis
-    pub fn get_risk_metrics(env: Env, user: Address) -> risk_management::RiskMetrics {
-        let portfolio: Portfolio = env
-            .storage()
-            .instance()
-            .get(&())
-            .unwrap_or_else(|| Portfolio::new(&env));
-
-        risk_management::PortfolioRisk::calculate_risk_metrics(&env, &portfolio, &user)
-    }
-
-    /// Check if a position change would exceed risk limits
-    /// Returns true if the trade would violate risk limits
-    pub fn check_risk_limits(
-        env: Env,
-        user: Address,
-        asset: Symbol,
-        amount_change: i128,
-    ) -> bool {
-        let portfolio: Portfolio = env
-            .storage()
-            .instance()
-            .get(&())
-            .unwrap_or_else(|| Portfolio::new(&env));
-
-        let asset_enum = if asset == symbol_short!("XLM") {
-            Asset::XLM
-        } else {
-            Asset::Custom(asset)
-        };
-
-        // Check circuit breaker first
-        if risk_management::CircuitBreaker::is_circuit_breaker_active(&env) {
-            return true; // Block all trades
-        }
-
-        // Check position limits
-        match risk_management::PositionLimits::check_position_limits(
-            &env,
-            &portfolio,
-            &user,
-            &asset_enum,
-            amount_change,
-        ) {
-            Ok(_) => false, // Within limits
-            Err(_) => true, // Exceeds limits
-        }
-    }
-
-    /// Check if portfolio concentration exceeds warning threshold
-    pub fn check_concentration_warning(env: Env, user: Address) -> bool {
-        let portfolio: Portfolio = env
-            .storage()
-            .instance()
-            .get(&())
-            .unwrap_or_else(|| Portfolio::new(&env));
-
-        risk_management::ConcentrationRisk::check_concentration_warning(&env, &portfolio, &user)
-    }
-
-    /// Check if portfolio concentration exceeds limit (should block trades)
-    pub fn check_concentration_limit(env: Env, user: Address) -> bool {
-        let portfolio: Portfolio = env
-            .storage()
-            .instance()
-            .get(&())
-            .unwrap_or_else(|| Portfolio::new(&env));
-
-        risk_management::ConcentrationRisk::check_concentration_limit(&env, &portfolio, &user)
-    }
-
-    /// Get circuit breaker status
-    pub fn get_circuit_breaker_status(env: Env) -> risk_management::CircuitBreakerState {
-        risk_management::CircuitBreaker::get_circuit_breaker_state(&env)
-    }
-
-    /// Manually trigger circuit breaker (admin only)
-    pub fn trigger_circuit_breaker(
-        env: Env,
-        admin: Address,
-        reason: Symbol,
-    ) -> Result<(), SwapTradeError> {
-        admin.require_auth();
-        crate::admin::require_admin(&env, &admin)?;
-
-        risk_management::CircuitBreaker::trigger_circuit_breaker(&env, reason, 0);
-        Ok(())
-    }
-
-    /// Reset circuit breaker (admin only)
-    pub fn reset_circuit_breaker(env: Env, admin: Address) -> Result<(), SwapTradeError> {
-        admin.require_auth();
-        crate::admin::require_admin(&env, &admin)?;
-
-        risk_management::CircuitBreaker::reset_circuit_breaker(&env);
-        Ok(())
-    }
-
-    /// Update risk configuration parameters (admin only)
-    pub fn update_risk_config(
-        env: Env,
-        admin: Address,
-        config: risk_management::RiskConfig,
-    ) -> Result<(), SwapTradeError> {
-        admin.require_auth();
-        crate::admin::require_admin(&env, &admin)?;
-
-        risk_management::PositionLimits::set_risk_config(&env, &config);
-        Ok(())
-    }
-
-    /// Get current risk configuration
-    pub fn get_risk_config(env: Env) -> risk_management::RiskConfig {
-        risk_management::PositionLimits::get_risk_config(&env)
-    }
-
-    /// Emergency risk parameter adjustment (admin only)
-    /// Allows immediate changes to risk limits during market stress
-    pub fn emergency_risk_adjustment(
-        env: Env,
-        admin: Address,
-        max_position_per_user: Option<i128>,
-        max_position_per_asset: Option<i128>,
-        concentration_limit_threshold: Option<u32>,
-        circuit_breaker_threshold: Option<u32>,
-    ) -> Result<(), SwapTradeError> {
-        admin.require_auth();
-        crate::admin::require_admin(&env, &admin)?;
-
-        let mut config = risk_management::PositionLimits::get_risk_config(&env);
-
-        if let Some(limit) = max_position_per_user {
-            config.max_position_per_user = limit;
-        }
-        if let Some(limit) = max_position_per_asset {
-            config.max_position_per_asset = limit;
-        }
-        if let Some(threshold) = concentration_limit_threshold {
-            config.concentration_limit_threshold = threshold;
-        }
-        if let Some(threshold) = circuit_breaker_threshold {
-            config.circuit_breaker_threshold = threshold;
-        }
-
-        risk_management::PositionLimits::set_risk_config(&env, &config);
-        Ok(())
+    /// Withdraw accumulated commission
+    pub fn withdraw_commission(env: Env, user: Address) -> i128 {
+        referral_system::withdraw_commission(&env, user)
     }
 }
 
