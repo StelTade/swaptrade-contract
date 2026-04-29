@@ -293,7 +293,7 @@ impl PoolRegistry {
         let (norm_in, norm_out) = Self::normalize_pair(token_in.clone(), token_out.clone());
         if let Some(pool_id) = self.pair_to_pool.get((norm_in, norm_out)) {
             if let Some(pool) = self.pools.get(pool_id) {
-                let output = self.calculate_output(&pool, token_in.clone(), amount_in);
+                let output = self.calculate_output(&pool, token_in.clone(), amount_in)?;
                 let impact = self.calculate_price_impact(&pool, token_in.clone(), amount_in);
                 let mut pools = Vec::new(env);
                 pools.push_back(pool_id);
@@ -325,9 +325,9 @@ impl PoolRegistry {
                         if let Some(pool2_id) = self.pair_to_pool.get((norm_int, norm_out)) {
                             if let Some(pool2) = self.pools.get(pool2_id) {
                                 let out1 =
-                                    self.calculate_output(&pool1, token_in.clone(), amount_in);
+                                     self.calculate_output(&pool1, token_in.clone(), amount_in)?;
                                 let out2 =
-                                    self.calculate_output(&pool2, intermediate.clone(), out1);
+                                     self.calculate_output(&pool2, intermediate.clone(), out1)?;
                                 let impact1 = self.calculate_price_impact(
                                     &pool1,
                                     token_in.clone(),
@@ -361,15 +361,24 @@ impl PoolRegistry {
         best_route
     }
 
-    fn calculate_output(&self, pool: &LiquidityPool, token_in: Symbol, amount_in: i128) -> i128 {
+    fn calculate_output(&self, pool: &LiquidityPool, token_in: Symbol, amount_in: i128) -> Result<i128, ContractError> {
         let (reserve_in, reserve_out) = if token_in == pool.token_a {
             (pool.reserve_a, pool.reserve_b)
         } else {
             (pool.reserve_b, pool.reserve_a)
         };
-        let amount_in_with_fee = (amount_in as u128) * (10000 - pool.fee_tier as u128) / 10000;
-        ((reserve_out as u128) * amount_in_with_fee / ((reserve_in as u128) + amount_in_with_fee))
-            as i128
+        let amount_in_with_fee = (amount_in as u128)
+            .checked_mul(10000 - pool.fee_tier as u128)
+            .ok_or(ContractError::AmountOverflow)?
+            / 10000;
+        let numerator = (reserve_out as u128)
+            .checked_mul(amount_in_with_fee)
+            .ok_or(ContractError::AmountOverflow)?;
+        let denominator = (reserve_in as u128)
+            .checked_add(amount_in_with_fee)
+            .ok_or(ContractError::AmountOverflow)?;
+        let amount_out = (numerator / denominator) as i128;
+        Ok(amount_out)
     }
 
     fn calculate_price_impact(

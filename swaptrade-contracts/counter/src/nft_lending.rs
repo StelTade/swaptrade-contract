@@ -14,6 +14,8 @@ const MAX_LOAN_DURATION: u64 = 31536000;
 const MAX_INTEREST_RATE_BPS: u32 = 100;
 /// Liquidation threshold (grace period after due date)
 const LIQUIDATION_GRACE_PERIOD: u64 = 86400; // 1 day
+/// Precision for interest calculations (10^18)
+const INTEREST_PRECISION: u128 = 1_000_000_000_000_000_000u128;
 
 /// Loan-to-value ratio in basis points that triggers liquidation (70%)
 const LIQUIDATION_TRIGGER_LTV_BPS: u32 = 7000;
@@ -208,10 +210,23 @@ pub fn fund_loan(env: &Env, lender: Address, loan_id: u64) -> Result<(), NFTErro
 
     let current_time = env.ledger().timestamp();
 
-    // Calculate repayment amount
-    let daily_interest = (loan.loan_amount * loan.interest_rate_bps as i128) / 10000;
-    let total_interest = daily_interest * (loan.duration / 86400) as i128;
-    loan.repayment_amount = loan.loan_amount + total_interest;
+    // Calculate repayment amount using scaled arithmetic to prevent precision loss
+    let scaled_principal = (loan.loan_amount as u128).checked_mul(INTEREST_PRECISION)
+        .ok_or(NFTError::InterestOverflow)?;
+    let daily_interest_rate = loan.interest_rate_bps as u128;
+    let daily_interest_scaled = scaled_principal
+        .checked_mul(daily_interest_rate)
+        .ok_or(NFTError::InterestOverflow)?
+        .checked_div(10000 * INTEREST_PRECISION)
+        .ok_or(NFTError::InterestOverflow)?;
+    let days = (loan.duration / 86400) as u128;
+    let total_interest_scaled = daily_interest_scaled
+        .checked_mul(days)
+        .ok_or(NFTError::InterestOverflow)?;
+    let total_interest = (total_interest_scaled / INTEREST_PRECISION) as i128;
+    loan.repayment_amount = loan.loan_amount
+        .checked_add(total_interest as i128)
+        .ok_or(NFTError::AmountOverflow)?;
 
     // Activate loan
     loan.lender = lender.clone();
