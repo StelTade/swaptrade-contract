@@ -527,8 +527,16 @@ impl NFTLoan {
         }
         let elapsed = current_time.saturating_sub(self.start_time);
         let days_elapsed = elapsed / 86400;
-        let daily_interest = (self.loan_amount * self.interest_rate_bps as i128) / 10000;
-        daily_interest * days_elapsed as i128
+        // Use saturating arithmetic to prevent overflow
+        // Scale to u128 for precision, then convert back
+        let scaled_principal = (self.loan_amount as u128).saturating_mul(1_000_000_000_000_000_000u128);
+        let daily_interest_rate = self.interest_rate_bps as u128;
+        let daily_interest_scaled = scaled_principal
+            .saturating_mul(daily_interest_rate)
+            .saturating_div(10000 * 1_000_000_000_000_000_000u128);
+        let total_interest_scaled = daily_interest_scaled.saturating_mul(days_elapsed as u128);
+        let total_interest = (total_interest_scaled / 1_000_000_000_000_000_000u128) as i128;
+        total_interest
     }
 
     /// Calculate total amount due

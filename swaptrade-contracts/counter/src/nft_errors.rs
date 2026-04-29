@@ -120,6 +120,8 @@ pub enum NFTError {
     NoAuctionBids = 1513,
     /// Invalid liquidation bid
     InvalidLiquidationBid = 1514,
+    /// Interest calculation overflow
+    InterestOverflow = 1515,
 
     // ===== Royalty Errors (1600-1699) =====
     /// Royalty payment failed

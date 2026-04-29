@@ -46,6 +46,9 @@ mod oracle_adapter_tests;
 mod multihop_swap_tests;
 mod governance_types;
 mod governance_system;
+mod governance_params;
+mod nonce;
+mod risk_management;
 
 pub use governance_params::{GovernanceParams, ParamKey, PendingParamUpdate};
 pub use nonce::NonceGuard;
@@ -74,6 +77,7 @@ mod network_congestion;
 
 #[cfg(all(test, feature = "experimental"))]
 mod dynamic_fee_adjustment_tests;
+mod risk_management_tests;
 
 // Staking Bonus System
 mod staking_bonus;
@@ -373,6 +377,44 @@ impl CounterContract {
         // Check rate limit before executing swap
         RateLimiter::check_swap_limit(&env, &user, &user_tier)
             .map_err(|_| ContractError::RateLimitExceeded)?;
+
+        // ===== RISK MANAGEMENT CHECKS =====
+
+        // Check circuit breaker
+        if risk_management::CircuitBreaker::is_circuit_breaker_active(&env) {
+            return Err(ContractError::CircuitBreakerActive);
+        }
+
+        // Check concentration limits
+        if risk_management::ConcentrationRisk::check_concentration_limit(&env, &portfolio, &user) {
+            return Err(ContractError::InvalidAmount); // Use existing error for now
+        }
+
+        // Check position limits for the asset being purchased
+        let to_asset = if to == symbol_short!("XLM") {
+            Asset::XLM
+        } else {
+            Asset::Custom(to.clone())
+        };
+
+        // Estimate output amount for position limit check
+        let estimated_out = if from == symbol_short!("XLM") && to == symbol_short!("USDCSIM") {
+            amount // Simplified 1:1 for limit checking
+        } else if from == symbol_short!("USDCSIM") && to == symbol_short!("XLM") {
+            amount
+        } else {
+            amount // Fallback
+        };
+
+        if let Err(_) = risk_management::PositionLimits::check_position_limits(
+            &env,
+            &portfolio,
+            &user,
+            &to_asset,
+            estimated_out,
+        ) {
+            return Err(ContractError::InvalidAmount); // Position limit exceeded
+        }
 
         let fee_bps = user_tier.effective_fee_bps();
 
@@ -1431,6 +1473,156 @@ impl CounterContract {
     /// Get total voting power in the system
     pub fn get_total_voting_power(env: Env) -> u128 {
         crate::staking_bonus::StakingBonusManager::get_total_staked(&env) as u128
+    // Risk Management System
+    // ────────────────────────────────────────────────────────────────────────
+
+    /// Get comprehensive risk metrics for a user
+    /// Returns exposure, risk scores, and position analysis
+    pub fn get_risk_metrics(env: Env, user: Address) -> risk_management::RiskMetrics {
+        let portfolio: Portfolio = env
+            .storage()
+            .instance()
+            .get(&())
+            .unwrap_or_else(|| Portfolio::new(&env));
+
+        risk_management::PortfolioRisk::calculate_risk_metrics(&env, &portfolio, &user)
+    }
+
+    /// Check if a position change would exceed risk limits
+    /// Returns true if the trade would violate risk limits
+    pub fn check_risk_limits(
+        env: Env,
+        user: Address,
+        asset: Symbol,
+        amount_change: i128,
+    ) -> bool {
+        let portfolio: Portfolio = env
+            .storage()
+            .instance()
+            .get(&())
+            .unwrap_or_else(|| Portfolio::new(&env));
+
+        let asset_enum = if asset == symbol_short!("XLM") {
+            Asset::XLM
+        } else {
+            Asset::Custom(asset)
+        };
+
+        // Check circuit breaker first
+        if risk_management::CircuitBreaker::is_circuit_breaker_active(&env) {
+            return true; // Block all trades
+        }
+
+        // Check position limits
+        match risk_management::PositionLimits::check_position_limits(
+            &env,
+            &portfolio,
+            &user,
+            &asset_enum,
+            amount_change,
+        ) {
+            Ok(_) => false, // Within limits
+            Err(_) => true, // Exceeds limits
+        }
+    }
+
+    /// Check if portfolio concentration exceeds warning threshold
+    pub fn check_concentration_warning(env: Env, user: Address) -> bool {
+        let portfolio: Portfolio = env
+            .storage()
+            .instance()
+            .get(&())
+            .unwrap_or_else(|| Portfolio::new(&env));
+
+        risk_management::ConcentrationRisk::check_concentration_warning(&env, &portfolio, &user)
+    }
+
+    /// Check if portfolio concentration exceeds limit (should block trades)
+    pub fn check_concentration_limit(env: Env, user: Address) -> bool {
+        let portfolio: Portfolio = env
+            .storage()
+            .instance()
+            .get(&())
+            .unwrap_or_else(|| Portfolio::new(&env));
+
+        risk_management::ConcentrationRisk::check_concentration_limit(&env, &portfolio, &user)
+    }
+
+    /// Get circuit breaker status
+    pub fn get_circuit_breaker_status(env: Env) -> risk_management::CircuitBreakerState {
+        risk_management::CircuitBreaker::get_circuit_breaker_state(&env)
+    }
+
+    /// Manually trigger circuit breaker (admin only)
+    pub fn trigger_circuit_breaker(
+        env: Env,
+        admin: Address,
+        reason: Symbol,
+    ) -> Result<(), SwapTradeError> {
+        admin.require_auth();
+        crate::admin::require_admin(&env, &admin)?;
+
+        risk_management::CircuitBreaker::trigger_circuit_breaker(&env, reason, 0);
+        Ok(())
+    }
+
+    /// Reset circuit breaker (admin only)
+    pub fn reset_circuit_breaker(env: Env, admin: Address) -> Result<(), SwapTradeError> {
+        admin.require_auth();
+        crate::admin::require_admin(&env, &admin)?;
+
+        risk_management::CircuitBreaker::reset_circuit_breaker(&env);
+        Ok(())
+    }
+
+    /// Update risk configuration parameters (admin only)
+    pub fn update_risk_config(
+        env: Env,
+        admin: Address,
+        config: risk_management::RiskConfig,
+    ) -> Result<(), SwapTradeError> {
+        admin.require_auth();
+        crate::admin::require_admin(&env, &admin)?;
+
+        risk_management::PositionLimits::set_risk_config(&env, &config);
+        Ok(())
+    }
+
+    /// Get current risk configuration
+    pub fn get_risk_config(env: Env) -> risk_management::RiskConfig {
+        risk_management::PositionLimits::get_risk_config(&env)
+    }
+
+    /// Emergency risk parameter adjustment (admin only)
+    /// Allows immediate changes to risk limits during market stress
+    pub fn emergency_risk_adjustment(
+        env: Env,
+        admin: Address,
+        max_position_per_user: Option<i128>,
+        max_position_per_asset: Option<i128>,
+        concentration_limit_threshold: Option<u32>,
+        circuit_breaker_threshold: Option<u32>,
+    ) -> Result<(), SwapTradeError> {
+        admin.require_auth();
+        crate::admin::require_admin(&env, &admin)?;
+
+        let mut config = risk_management::PositionLimits::get_risk_config(&env);
+
+        if let Some(limit) = max_position_per_user {
+            config.max_position_per_user = limit;
+        }
+        if let Some(limit) = max_position_per_asset {
+            config.max_position_per_asset = limit;
+        }
+        if let Some(threshold) = concentration_limit_threshold {
+            config.concentration_limit_threshold = threshold;
+        }
+        if let Some(threshold) = circuit_breaker_threshold {
+            config.circuit_breaker_threshold = threshold;
+        }
+
+        risk_management::PositionLimits::set_risk_config(&env, &config);
+        Ok(())
     }
 }
 
