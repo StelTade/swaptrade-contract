@@ -141,6 +141,11 @@ impl Events {
             .publish((Symbol::new(env, "AdminResumed"), admin), (timestamp,));
     }
 
+    pub fn admin_changed(env: &Env, old_admin: Address, new_admin: Address, timestamp: i64) {
+        env.events()
+            .publish((Symbol::new(env, "AdminChanged"),), (old_admin, new_admin, timestamp));
+    }
+
     pub fn faucet_claimed(env: &Env, user: Address, asset: Symbol, amount: i128, timestamp: u64) {
         env.events().publish(
             (Symbol::new(env, "FaucetClaimed"), user, asset),
