@@ -27,6 +27,14 @@ pub enum SwapTradeError {
     ProposalAlreadyExecuted = 91,
     AlreadyApproved = 92,
     InsufficientApprovals = 93,
+    TimelockNotElapsed = 94,
+    AlreadyVoted = 95,
+    InsufficientSignatures = 96,
+    QuorumNotReached = 97,
+    ProposalFailed = 98,
+    ProposalCanceled = 99,
+    VotingEnded = 100,
+    NotInCouncil = 101,
 
     // ── Trading / contract state ────────────────────────────────────────────
     TradingPaused = 10,

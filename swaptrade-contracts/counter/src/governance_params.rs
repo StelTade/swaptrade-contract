@@ -181,6 +181,28 @@ impl GovernanceParams {
         Ok(())
     }
 
+    /// Directly apply a parameter update (called by the main governance contract).
+    ///
+    /// This bypasses the internal timelock, as the main governance system
+    /// has its own timelock. It still validates the parameter value.
+    pub fn apply_param_update(
+        env: &Env,
+        param: ParamKey,
+        new_value: i128,
+    ) -> Result<(), SwapTradeError> {
+        // The caller (main governance contract) is responsible for authorization.
+        Self::validate_param_value(&param, new_value)?;
+        env.storage().persistent().set(
+            &GovParamStorageKey::ParamValue(param.clone()),
+            &new_value,
+        );
+        env.events().publish(
+            (symbol_short!("gov"), symbol_short!("applied")),
+            (param, new_value),
+        );
+        Ok(())
+    }
+
     /// Read a committed parameter value.
     pub fn get_param(env: &Env, param: ParamKey) -> Option<i128> {
         env.storage()
