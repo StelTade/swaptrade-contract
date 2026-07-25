@@ -53,6 +53,9 @@ mod orders;
 mod orders_tests;
 mod risk_management;
 
+#[cfg(test)]
+mod admin_controls_test;
+
 mod governance_system;
 
 #[cfg(test)]
@@ -186,6 +189,14 @@ fn require_authenticated_verified_user(env: &Env, user: &Address) -> Result<(), 
     require_verified_user(env, user)
 }
 
+fn require_not_paused(env: &Env) -> Result<(), ContractError> {
+    let paused: bool = env.storage().persistent().get(&PAUSED_KEY).unwrap_or(false);
+    if paused {
+        return Err(ContractError::TradingPaused);
+    }
+    Ok(())
+}
+
 // pub fn pause_trading(env: Env, caller: Address) -> Result<bool, SwapTradeError> {
 //     caller.require_auth();
 //     crate::admin::require_admin(&env, &caller)?;
@@ -200,49 +211,6 @@ fn require_authenticated_verified_user(env: &Env, user: &Address) -> Result<(), 
 //     Ok(true)
 // }
 
-// pub fn set_admin(env: Env, caller: Address, new_admin: Address) -> Result<(), SwapTradeError> {
-//     caller.require_auth();
-//     crate::admin::require_admin(&env, &caller)?;
-//     env.storage().persistent().set(&ADMIN_KEY, &new_admin);
-//     Ok(())
-// }
-
-// pub fn set_treasury(
-//     env: Env,
-//     caller: Address,
-//     new_treasury: Address,
-// ) -> Result<(), SwapTradeError> {
-//     caller.require_auth();
-//     crate::admin::require_admin(&env, &caller)?;
-//     env.storage()
-//         .persistent()
-//         .set(&crate::storage::DEFAULT_TREASURY_KEY, &new_treasury);
-//     crate::events::fee_parameters_updated(&env, 0, 0, Some(new_treasury));
-//     Ok(())
-// }
-
-pub fn pause_trading(env: Env) -> Result<bool, SwapTradeError> {
-    env.storage().persistent().set(&PAUSED_KEY, &true);
-    Ok(true)
-}
-
-pub fn resume_trading(env: Env) -> Result<bool, SwapTradeError> {
-    env.storage().persistent().set(&PAUSED_KEY, &false);
-    Ok(true)
-}
-
-pub fn set_admin(env: Env, new_admin: Address) -> Result<(), SwapTradeError> {
-    env.storage().persistent().set(&ADMIN_KEY, &new_admin);
-    Ok(())
-}
-
-pub fn set_treasury(env: Env, new_treasury: Address) -> Result<(), SwapTradeError> {
-    env.storage()
-        .persistent()
-        .set(&crate::storage::DEFAULT_TREASURY_KEY, &new_treasury);
-    crate::events::fee_parameters_updated(&env, 0, 0, Some(new_treasury));
-    Ok(())
-}
 
 pub fn create_proposal(
     env: Env,
@@ -461,6 +429,50 @@ impl CounterContract {
         migration::migrate_from_v1_to_v2(&env)
     }
 
+    /// Set the admin address (admin only)
+    pub fn set_admin(env: Env, caller: Address, new_admin: Address) -> Result<(), SwapTradeError> {
+        caller.require_auth();
+        crate::admin::require_admin(&env, &caller)?;
+        
+        let old_admin = crate::admin::get_admin(&env);
+        env.storage().persistent().set(&ADMIN_KEY, &new_admin);
+        
+        crate::events::admin_changed(&env, old_admin, new_admin, env.ledger().timestamp());
+        Ok(())
+    }
+
+    /// Pause trading (admin only)
+    pub fn pause_trading(env: Env, caller: Address) -> Result<bool, SwapTradeError> {
+        caller.require_auth();
+        crate::admin::require_admin(&env, &caller)?;
+        
+        env.storage().persistent().set(&PAUSED_KEY, &true);
+        crate::events::admin_paused(&env, caller, env.ledger().timestamp());
+        Ok(true)
+    }
+
+    /// Resume trading (admin only)
+    pub fn resume_trading(env: Env, caller: Address) -> Result<bool, SwapTradeError> {
+        caller.require_auth();
+        crate::admin::require_admin(&env, &caller)?;
+        
+        env.storage().persistent().set(&PAUSED_KEY, &false);
+        crate::events::admin_resumed(&env, caller, env.ledger().timestamp());
+        Ok(true)
+    }
+
+    /// Set the treasury address (admin only)
+    pub fn set_treasury(env: Env, caller: Address, new_treasury: Address) -> Result<(), SwapTradeError> {
+        caller.require_auth();
+        crate::admin::require_admin(&env, &caller)?;
+        
+        env.storage()
+            .persistent()
+            .set(&crate::storage::DEFAULT_TREASURY_KEY, &new_treasury);
+        crate::events::fee_parameters_updated(&env, 0, 0, Some(new_treasury));
+        Ok(())
+    }
+
     pub fn mint(env: Env, token: Symbol, to: Address, amount: i128) {
         let mut portfolio: Portfolio = env
             .storage()
@@ -509,6 +521,7 @@ impl CounterContract {
         amount: i128,
         user: Address,
     ) -> Result<i128, ContractError> {
+        require_not_paused(&env)?;
         require_authenticated_verified_user(&env, &user)?;
 
         // Oracle validation
@@ -649,6 +662,9 @@ impl CounterContract {
     /// Non-panicking swap that counts failed orders and returns 0 on failure
     pub fn safe_swap(env: Env, from: Symbol, to: Symbol, amount: i128, user: Address, deadline: u64) -> i128 {
         if env.ledger().timestamp() > deadline {
+            return 0;
+        }
+        if require_not_paused(&env).is_err() {
             return 0;
         }
         if require_authenticated_verified_user(&env, &user).is_err() {
@@ -911,6 +927,13 @@ impl CounterContract {
     // ===== BATCH OPERATIONS =====
 
     pub fn execute_batch_atomic(env: Env, operations: Vec<BatchOperation>) -> BatchResult {
+        // Check if trading is paused
+        if require_not_paused(&env).is_err() {
+            let mut result = BatchResult::new(&env);
+            result.operations_failed = 1;
+            return result;
+        }
+
         // Validate batch operations are not empty
         if operations.is_empty() {
             let mut result = BatchResult::new(&env);
@@ -997,6 +1020,13 @@ impl CounterContract {
     }
 
     pub fn execute_batch_best_effort(env: Env, operations: Vec<BatchOperation>) -> BatchResult {
+        // Check if trading is paused
+        if require_not_paused(&env).is_err() {
+            let mut result = BatchResult::new(&env);
+            result.operations_failed = 1;
+            return result;
+        }
+
         // Validate batch operations are not empty
         if operations.is_empty() {
             let mut result = BatchResult::new(&env);
@@ -1096,6 +1126,7 @@ impl CounterContract {
         usdc_amount: i128,
         user: Address,
     ) -> Result<i128, ContractError> {
+        require_not_paused(&env)?;
         require_authenticated_verified_user(&env, &user)?;
 
         if xlm_amount <= 0 || usdc_amount <= 0 {
@@ -1231,6 +1262,7 @@ impl CounterContract {
         lp_tokens: i128,
         user: Address,
     ) -> Result<(i128, i128), ContractError> {
+        require_not_paused(&env)?;
         require_authenticated_verified_user(&env, &user)?;
 
         if lp_tokens <= 0 {
@@ -1359,6 +1391,7 @@ impl CounterContract {
         amount_b: i128,
         provider: Address,
     ) -> Result<i128, ContractError> {
+        require_not_paused(&env)?;
         provider.require_auth();
         require_verified_user(&env, &provider)?;
 
@@ -1386,6 +1419,7 @@ impl CounterContract {
         lp_tokens: i128,
         provider: Address,
     ) -> Result<(i128, i128), ContractError> {
+        require_not_paused(&env)?;
         provider.require_auth();
         require_verified_user(&env, &provider)?;
 
@@ -1415,6 +1449,7 @@ impl CounterContract {
         min_amount_out: i128,
         trader: Address,
     ) -> Result<i128, ContractError> {
+        require_not_paused(&env)?;
         trader.require_auth();
         require_verified_user(&env, &trader)?;
 
