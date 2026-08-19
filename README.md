@@ -59,6 +59,28 @@ swaptrade-contracts/
    cd swaptrade-contracts
    ```
 
+## TypeScript SDK and example DApp
+
+A typed JavaScript/TypeScript client for these contracts, plus a runnable React
+demo, live alongside the Rust crates:
+
+| Path | What it is |
+| --- | --- |
+| [`packages/swaptrade-sdk`](packages/swaptrade-sdk/README.md) | TypeScript SDK — one method per contract entry point, typed errors, ScVal encoding |
+| [`examples/swap-demo`](examples/swap-demo/README.md) | React demo walking a create → fund → accept workflow |
+| [`docs/LOCALNET.md`](docs/LOCALNET.md) | Reproducible localnet walkthrough, and what was verified on-chain |
+| [`docs/CONTRIBUTING_SDK.md`](docs/CONTRIBUTING_SDK.md) | Contributor guide for the SDK and examples |
+| [`docs/IMPACT.md`](docs/IMPACT.md) | What this adds, in measured terms |
+
+```bash
+npm install
+npm run build --workspace @swaptrade/sdk
+npm run test          # 121 tests, no network access
+npm run demo          # needs configuration — see the demo README
+```
+
+Requires Node.js 20+. Rust contract work is unaffected by these workspaces.
+
 ## Migration Process
 
 SwapTrade contracts support versioning and data migration to ensure historical data is preserved during upgrades.

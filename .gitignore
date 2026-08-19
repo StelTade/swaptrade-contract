@@ -29,3 +29,29 @@ Thumbs.db
 
 # Logs
 *.log
+
+# Node / TypeScript SDK & examples
+node_modules/
+dist/
+coverage/
+.env
+.env.local
+*.tsbuildinfo
+
+# Playwright
+test-results/
+playwright-report/
+blob-report/
+playwright/.cache/
+
+# The `*.json` rule above is intentionally broad (it hides generated Soroban
+# artifacts), so re-include the JSON files that must be version-controlled for
+# the SDK and example app to be installable after a fresh clone.
+!package.json
+!package-lock.json
+!tsconfig*.json
+!packages/**/package.json
+!packages/**/tsconfig*.json
+!examples/**/package.json
+!examples/**/tsconfig*.json
+!.github/**/*.json
