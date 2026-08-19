@@ -1,4 +1,4 @@
-use soroban_sdk::{symbol_short, Address, Env, Map, Symbol};
+use soroban_sdk::{symbol_short, Address, Env, IntoVal, Map, Symbol, Vec};
 
 use crate::errors::SwapError;
 use crate::types::Swap;
@@ -87,4 +87,75 @@ pub fn update_swap(env: &Env, swap: &Swap) {
     let mut map = swap_map(env);
     map.set(swap.id, swap.clone());
     save_swap_map(env, &map);
+}
+
+// ── Trustline check ──────────────────────────────────────────
+
+/// Returns `true` if `address` holds a trustline for `asset`.
+///
+/// Invokes the Stellar Asset Contract's `balance(address) → i128`.
+/// If the call succeeds the trustline exists; if it traps, it doesn't.
+pub fn has_trustline(env: &Env, address: &Address, asset: &Address) -> bool {
+    // `try_invoke_contract` returns Result<Result<T, E>, InvokeError>.
+    // We only care whether the outer + inner are both Ok.
+    let args: Vec<soroban_sdk::Val> = Vec::from_array(env, [address.to_val()]);
+    let result = env.try_invoke_contract::<i128, SwapError>(
+        asset,
+        &Symbol::new(env, "balance"),
+        args,
+    );
+    matches!(result, Ok(Ok(_)))
+}
+
+// ── Token transfer ───────────────────────────────────────────
+
+/// Internal transfer helper.  Does NOT call `require_auth` — the caller
+/// is responsible for ensuring authorization has been obtained.
+fn invoke_transfer(
+    env: &Env,
+    asset: &Address,
+    from: &Address,
+    to: &Address,
+    amount: i128,
+) -> Result<i128, SwapError> {
+    let args: Vec<soroban_sdk::Val> = soroban_sdk::vec![env,
+        from.to_val(),
+        to.to_val(),
+        amount.into_val(env),
+    ];
+    let result = env.try_invoke_contract::<i128, SwapError>(
+        asset,
+        &Symbol::new(env, "transfer"),
+        args,
+    );
+    match result {
+        Ok(Ok(transferred)) => Ok(transferred),
+        Ok(Err(_swap_err)) => Err(SwapError::TransferMismatch),
+        Err(_invoke_err) => Err(SwapError::TransferMismatch),
+    }
+}
+
+/// Transfer tokens via the Stellar Asset Contract's `transfer`.
+/// Requires auth on `from`.
+pub fn transfer_token(
+    env: &Env,
+    asset: &Address,
+    from: &Address,
+    to: &Address,
+    amount: i128,
+) -> Result<i128, SwapError> {
+    from.require_auth();
+    invoke_transfer(env, asset, from, to, amount)
+}
+
+/// Transfer tokens without requiring auth on `from` (for internal
+/// bookkeeping when auth is satisfied at the entry point).
+pub fn transfer_token_no_auth(
+    env: &Env,
+    asset: &Address,
+    from: &Address,
+    to: &Address,
+    amount: i128,
+) -> Result<i128, SwapError> {
+    invoke_transfer(env, asset, from, to, amount)
 }
