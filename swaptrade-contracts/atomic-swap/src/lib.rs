@@ -1,5 +1,7 @@
 #![cfg_attr(all(not(test), target_family = "wasm"), no_std)]
 
+extern crate alloc;
+
 mod errors;
 mod events;
 mod storage;
@@ -22,8 +24,23 @@ pub struct AtomicSwapContract;
 
 #[contractimpl]
 impl AtomicSwapContract {
+    // ════════════════════════════════════════════════════════
+    //  CREATE SWAP
+    // ════════════════════════════════════════════════════════
+
     /// Create a new atomic swap offer.
     ///
+    /// # Parameters
+    /// * `creator` – the initiating party (requires auth)
+    /// * `counterparty` – the other party who will fund & accept
+    /// * `asset_a` – Stellar asset contract address for side A
+    /// * `amount_a` – amount of asset A (must be > 0)
+    /// * `asset_b` – Stellar asset contract address for side B
+    /// * `amount_b` – amount of asset B (must be > 0)
+    /// * `expiry` – ledger timestamp after which unaccepted swaps can be refunded
+    /// * `nonce` – client-supplied nonce for idempotency
+    ///
+    /// # Returns
     /// The unique swap id.  If (creator, nonce) was already used, returns the
     /// existing swap id without creating a duplicate.
     pub fn create_swap(
@@ -39,6 +56,7 @@ impl AtomicSwapContract {
     ) -> Result<u64, SwapError> {
         creator.require_auth();
 
+        // ── Param validation ──────────────────────────────────
         if amount_a <= 0 || amount_b <= 0 {
             return Err(SwapError::InvalidAmount);
         }
@@ -55,14 +73,17 @@ impl AtomicSwapContract {
             return Err(SwapError::InvalidExpiry);
         }
 
+        // ── Trustline pre-check: creator must trust asset_a ───
         if !storage::has_trustline(&env, &creator, &asset_a) {
             return Err(SwapError::MissingTrustline);
         }
 
+        // ── Idempotency ─────────────────────────────────────
         if let Some(existing_id) = storage::find_by_nonce(&env, &creator, nonce) {
             return Ok(existing_id);
         }
 
+        // ── Persist ──────────────────────────────────────────
         let id = storage::next_id(&env);
         let swap = Swap {
             id,
@@ -152,6 +173,82 @@ impl AtomicSwapContract {
     }
 
     // ════════════════════════════════════════════════════════
+    //  ACCEPT SWAP (atomic execution)
+    // ════════════════════════════════════════════════════════
+
+    /// Accept a funded swap: assets are transferred atomically.
+    ///
+    /// Only the counterparty can accept.  Both sides must have been
+    /// funded.  The swap must not have expired.  Trustlines for the
+    /// recipients are verified before transfer.
+    pub fn accept_swap(env: Env, swap_id: u64, acceptor: Address) -> Result<(), SwapError> {
+        acceptor.require_auth();
+
+        let mut swap = storage::load_swap(&env, swap_id)?;
+
+        if acceptor != swap.counterparty {
+            return Err(SwapError::Unauthorized);
+        }
+        // State must be Created or Funded (we transition to Funded only
+        // once both parties have deposited, but accept_swap should work
+        // whenever both flags are set).
+        if swap.state == SwapState::Accepted
+            || swap.state == SwapState::Cancelled
+            || swap.state == SwapState::Refunded
+        {
+            return Err(SwapError::InvalidState);
+        }
+        if !swap.creator_funded || !swap.counterparty_funded {
+            return Err(SwapError::InvalidState);
+        }
+
+        // ── Expiry check ─────────────────────────────────────
+        let now = env.ledger().timestamp();
+        if now >= swap.expiry {
+            return Err(SwapError::Expired);
+        }
+
+        // ── Trustline checks for recipients ───────────────────
+        // Counterparty will receive asset_a
+        if !storage::has_trustline(&env, &swap.counterparty, &swap.asset_a) {
+            return Err(SwapError::MissingTrustline);
+        }
+        // Creator will receive asset_b
+        if !storage::has_trustline(&env, &swap.creator, &swap.asset_b) {
+            return Err(SwapError::MissingTrustline);
+        }
+
+        // ── Atomic transfer ──────────────────────────────────
+        // The accept_swap auth covers the whole operation;
+        // individual transfers do not re-require auth.
+        let contract_addr = env.current_contract_address();
+
+        // Contract → counterparty (asset A)
+        storage::transfer_token_no_auth(
+            &env,
+            &swap.asset_a,
+            &contract_addr,
+            &swap.counterparty,
+            swap.amount_a,
+        )?;
+
+        // Contract → creator (asset B)
+        storage::transfer_token_no_auth(
+            &env,
+            &swap.asset_b,
+            &contract_addr,
+            &swap.creator,
+            swap.amount_b,
+        )?;
+
+        swap.state = SwapState::Accepted;
+        storage::update_swap(&env, &swap);
+        events::swap_accepted(&env, &swap);
+
+        Ok(())
+    }
+
+    // ════════════════════════════════════════════════════════
     //  CANCEL SWAP
     // ════════════════════════════════════════════════════════
 
@@ -183,7 +280,92 @@ impl AtomicSwapContract {
         Ok(())
     }
 
-    /// Placeholder for accept_swap + refund_swap — added in next commit.
-    #[allow(dead_code)]
-    fn _placeholder() {}
+    // ════════════════════════════════════════════════════════
+    //  REFUND SWAP
+    // ════════════════════════════════════════════════════════
+
+    /// Refund a funded-but-unaccepted swap after expiry.
+    ///
+    /// Both parties are refunded their respective deposits.
+    /// Only the creator may trigger the refund.
+    pub fn refund_swap(env: Env, swap_id: u64) -> Result<(), SwapError> {
+        let mut swap = storage::load_swap(&env, swap_id)?;
+
+        swap.creator.require_auth();
+
+        // Allow refund if at least one party has funded and the swap
+        // is not yet accepted, cancelled, or refunded.
+        if swap.state == SwapState::Accepted
+            || swap.state == SwapState::Cancelled
+            || swap.state == SwapState::Refunded
+        {
+            return Err(SwapError::InvalidState);
+        }
+        if !swap.creator_funded && !swap.counterparty_funded {
+            return Err(SwapError::InvalidState);
+        }
+
+        // Must be past expiry
+        let now = env.ledger().timestamp();
+        if now < swap.expiry {
+            return Err(SwapError::InvalidState);
+        }
+
+        let contract_addr = env.current_contract_address();
+
+        // Refund creator's deposit (asset A)
+        if swap.creator_funded {
+            storage::transfer_token_no_auth(
+                &env,
+                &swap.asset_a,
+                &contract_addr,
+                &swap.creator,
+                swap.amount_a,
+            )?;
+        }
+
+        // Refund counterparty's deposit (asset B)
+        if swap.counterparty_funded {
+            storage::transfer_token_no_auth(
+                &env,
+                &swap.asset_b,
+                &contract_addr,
+                &swap.counterparty,
+                swap.amount_b,
+            )?;
+        }
+
+        swap.state = SwapState::Refunded;
+        swap.creator_funded = false;
+        swap.counterparty_funded = false;
+        storage::update_swap(&env, &swap);
+        events::swap_refunded(&env, &swap);
+
+        Ok(())
+    }
+
+    // ════════════════════════════════════════════════════════
+    //  READ-ONLY QUERIES
+    // ════════════════════════════════════════════════════════
+
+    /// Fetch full swap metadata (read-only).
+    pub fn get_swap(env: Env, swap_id: u64) -> Result<Swap, SwapError> {
+        storage::load_swap(&env, swap_id)
+    }
+
+    /// Check whether `address` holds a trustline for `asset`.
+    pub fn check_trustline(env: Env, address: Address, asset: Address) -> bool {
+        storage::has_trustline(&env, &address, &asset)
+    }
+
+    /// Get the minimum expiry window (seconds).
+    pub fn get_min_expiry(env: Env) -> u64 {
+        storage::min_expiry(&env)
+    }
+
+    /// Admin: set the minimum expiry window.
+    pub fn set_min_expiry(env: Env, caller: Address, seconds: u64) {
+        caller.require_auth();
+        storage::set_min_expiry(&env, seconds);
+    }
 }
