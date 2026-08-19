@@ -24,17 +24,6 @@ pub struct AtomicSwapContract;
 impl AtomicSwapContract {
     /// Create a new atomic swap offer.
     ///
-    /// # Parameters
-    /// * `creator` – the initiating party (requires auth)
-    /// * `counterparty` – the other party who will fund & accept
-    /// * `asset_a` – Stellar asset contract address for side A
-    /// * `amount_a` – amount of asset A (must be > 0)
-    /// * `asset_b` – Stellar asset contract address for side B
-    /// * `amount_b` – amount of asset B (must be > 0)
-    /// * `expiry` – ledger timestamp after which unaccepted swaps can be refunded
-    /// * `nonce` – client-supplied nonce for idempotency
-    ///
-    /// # Returns
     /// The unique swap id.  If (creator, nonce) was already used, returns the
     /// existing swap id without creating a duplicate.
     pub fn create_swap(
@@ -50,7 +39,6 @@ impl AtomicSwapContract {
     ) -> Result<u64, SwapError> {
         creator.require_auth();
 
-        // ── Param validation ──────────────────────────────────
         if amount_a <= 0 || amount_b <= 0 {
             return Err(SwapError::InvalidAmount);
         }
@@ -67,17 +55,14 @@ impl AtomicSwapContract {
             return Err(SwapError::InvalidExpiry);
         }
 
-        // ── Trustline pre-check: creator must trust asset_a ───
         if !storage::has_trustline(&env, &creator, &asset_a) {
             return Err(SwapError::MissingTrustline);
         }
 
-        // ── Idempotency ─────────────────────────────────────
         if let Some(existing_id) = storage::find_by_nonce(&env, &creator, nonce) {
             return Ok(existing_id);
         }
 
-        // ── Persist ──────────────────────────────────────────
         let id = storage::next_id(&env);
         let swap = Swap {
             id,
@@ -100,7 +85,105 @@ impl AtomicSwapContract {
         Ok(id)
     }
 
-    /// Placeholder for fund_swap — added in next commit.
+    // ════════════════════════════════════════════════════════
+    //  FUND SWAP
+    // ════════════════════════════════════════════════════════
+
+    /// Deposit assets into escrow from either party.
+    ///
+    /// Verifies the funder holds a trustline for the relevant asset and
+    /// that the asset contract `transfer` succeeds.  Both parties must
+    /// fund before the swap can be accepted.
+    pub fn fund_swap(env: Env, swap_id: u64, funder: Address) -> Result<(), SwapError> {
+        funder.require_auth();
+
+        let mut swap = storage::load_swap(&env, swap_id)?;
+
+        if !swap.is_party(&funder) {
+            return Err(SwapError::Unauthorized);
+        }
+        if swap.state != SwapState::Created {
+            return Err(SwapError::InvalidState);
+        }
+        // Prevent double-funding: check if this party already funded.
+        let already_funded = if funder == swap.creator {
+            swap.creator_funded
+        } else {
+            swap.counterparty_funded
+        };
+        if already_funded {
+            return Err(SwapError::InvalidState);
+        }
+
+        // ── Determine which side this funder is covering ──────
+        let (asset, amount, flag) = if funder == swap.creator {
+            (
+                swap.asset_a.clone(),
+                swap.amount_a,
+                &mut swap.creator_funded,
+            )
+        } else {
+            (
+                swap.asset_b.clone(),
+                swap.amount_b,
+                &mut swap.counterparty_funded,
+            )
+        };
+
+        // ── Trustline check ───────────────────────────────────
+        if !storage::has_trustline(&env, &funder, &asset) {
+            return Err(SwapError::MissingTrustline);
+        }
+
+        // ── Transfer funder → contract (escrow) ───────────────
+        // Auth already checked above; use no_auth variant to avoid double-consume.
+        let contract_addr = env.current_contract_address();
+        storage::transfer_token_no_auth(&env, &asset, &funder, &contract_addr, amount)?;
+
+        *flag = true;
+        // Only mark as Funded when both parties have deposited.
+        if swap.creator_funded && swap.counterparty_funded {
+            swap.state = SwapState::Funded;
+        }
+        storage::update_swap(&env, &swap);
+        events::swap_funded(&env, &swap, funder);
+
+        Ok(())
+    }
+
+    // ════════════════════════════════════════════════════════
+    //  CANCEL SWAP
+    // ════════════════════════════════════════════════════════
+
+    /// Cancel a swap that has not yet been fully funded.
+    ///
+    /// Only the creator may cancel.  Once the counterparty has funded,
+    /// the creator cannot cancel (counterparty has economic interest).
+    pub fn cancel_swap(env: Env, swap_id: u64) -> Result<(), SwapError> {
+        let mut swap = storage::load_swap(&env, swap_id)?;
+
+        swap.creator.require_auth();
+
+        if swap.state != SwapState::Created {
+            return Err(SwapError::InvalidState);
+        }
+        // Counterparty has funded → creator cannot cancel.
+        if swap.counterparty_funded {
+            return Err(SwapError::InvalidState);
+        }
+        // Creator already funded → must use refund_swap instead.
+        if swap.creator_funded {
+            return Err(SwapError::InvalidState);
+        }
+
+        swap.state = SwapState::Cancelled;
+        storage::update_swap(&env, &swap);
+        events::swap_cancelled(&env, &swap);
+
+        Ok(())
+    }
+
+    /// Placeholder for accept_swap + refund_swap — added in next commit.
     #[allow(dead_code)]
     fn _placeholder() {}
 }
