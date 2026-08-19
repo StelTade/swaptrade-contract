@@ -1,6 +1,7 @@
 #![cfg_attr(all(not(test), target_family = "wasm"), no_std)]
 
 mod errors;
+mod events;
 mod types;
 
 pub use errors::SwapError;
