@@ -1,0 +1,22 @@
+[package]
+name = "atomic-swap"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["lib", "cdylib"]
+doctest = false
+
+[[test]]
+name = "atomic_swap_tests"
+path = "tests/atomic_swap_tests.rs"
+
+[dependencies]
+soroban-sdk = { workspace = true }
+
+[dev-dependencies]
+soroban-sdk = { workspace = true, features = ["testutils"] }
+
+[features]
+logging = []
