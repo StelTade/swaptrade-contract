@@ -23,6 +23,12 @@ Thumbs.db
 *.wasm
 *.json
 
+# Allow SDK and demo-app files
+!sdk/
+!sdk/**/*
+!demo-app/
+!demo-app/**/*
+
 # Build artifacts
 **/target/
 **/wasm32-unknown-unknown/
