@@ -899,9 +899,9 @@ impl OrderManager {
         env.storage().instance().set(&order_key, order);
     }
 
-    /// Add order to order book
-    fn add_to_order_book(env: &Env, token_in: Symbol, token_out: Symbol, order_id: u64) {
-        let pair = (token_in.clone(), token_out.clone());
+    /// Add order to order book with proper time-price priority sorting
+    fn add_to_order_book(env: &Env, base_token: Symbol, quote_token: Symbol, order: Order) {
+        let pair = (base_token.clone(), quote_token.clone());
         let pair_key = Self::order_book_key(&pair);
 
         let mut book: OrderBook = env
@@ -909,15 +909,57 @@ impl OrderManager {
             .instance()
             .get(&pair_key)
             .unwrap_or(OrderBook {
+                base_token,
+                quote_token,
+                bids: Vec::new(env),
+                asks: Vec::new(env),
                 token_pair: pair.clone(),
                 buy_orders: Vec::new(env),
                 sell_orders: Vec::new(env),
             });
 
-        // Determine if buy or sell order (simplified: based on token ordering)
-        // In reality, this would depend on whether user is buying or selling
-        book.buy_orders.push_back(order_id);
+        // Add to appropriate list based on side, maintaining sorted order
+        match order.side {
+            OrderSide::Buy => {
+                // Bids (buy orders) are sorted: higher prices first, same price: earlier orders first
+                let mut insert_idx = book.bids.len();
+                for (i, &existing_id) in book.bids.iter().enumerate() {
+                    if let Ok(existing_order) = Self::get_order(env, existing_id) {
+                        // If current order's price is higher, insert before this one
+                        if order.price > existing_order.price {
+                            insert_idx = i;
+                            break;
+                        } else if order.price == existing_order.price {
+                            // Same price, maintain time priority (add after older orders)
+                            continue;
+                        }
+                    }
+                }
+                book.bids.insert(insert_idx as u32, order.order_id);
+            },
+            OrderSide::Sell => {
+                // Asks (sell orders) are sorted: lower prices first, same price: earlier orders first
+                let mut insert_idx = book.asks.len();
+                for (i, &existing_id) in book.asks.iter().enumerate() {
+                    if let Ok(existing_order) = Self::get_order(env, existing_id) {
+                        // If current order's price is lower, insert before this one
+                        if order.price < existing_order.price {
+                            insert_idx = i;
+                            break;
+                        } else if order.price == existing_order.price {
+                            // Same price, maintain time priority (add after older orders)
+                            continue;
+                        }
+                    }
+                }
+                book.asks.insert(insert_idx as u32, order.order_id);
+            }
+        }
 
+        // Update backwards compatibility fields
+        book.buy_orders = book.bids.clone();
+        book.sell_orders = book.asks.clone();
+        
         env.storage().instance().set(&pair_key, &book);
     }
 
