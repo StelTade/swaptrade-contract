@@ -60,6 +60,8 @@ mod governance_system;
 
 #[cfg(test)]
 mod governance_system_tests;
+#[cfg(test)]
+mod proptest_fuzz;
 
 pub use governance_params::{GovernanceParams, ParamKey, PendingParamUpdate};
 pub use nonce::NonceGuard;
