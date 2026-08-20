@@ -1,0 +1,138 @@
+# SDK and example DApp checks.
+#
+# Scoped deliberately narrowly: this workflow covers only `packages/` and
+# `examples/`. The existing Rust workflows (ci.yml, format.yml,
+# formal_verification.yml) are left exactly as they are — they are currently
+# commented out, and re-enabling them is a separate decision from this change.
+#
+# Path filters keep the workflow proportionate: a contract-only commit does not
+# need to boot a browser.
+name: SDK
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'packages/**'
+      - 'examples/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/sdk.yml'
+  pull_request:
+    paths:
+      - 'packages/**'
+      - 'examples/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/sdk.yml'
+
+# A new push supersedes an in-flight run for the same ref.
+concurrency:
+  group: sdk-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    name: Build, typecheck and test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      # `npm ci` fails on a lockfile that disagrees with package.json, which is
+      # the check we want: dependencies must be reproducible from the committed
+      # lockfile alone.
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build SDK
+        run: npm run build --workspace @swaptrade/sdk
+
+      - name: Typecheck SDK
+        run: npm run typecheck --workspace @swaptrade/sdk
+
+      - name: Test SDK
+        run: npm run test --workspace @swaptrade/sdk
+
+      - name: Typecheck example DApp
+        run: npm run typecheck --workspace @swaptrade/swap-demo
+
+      - name: Test example DApp
+        run: npm run test --workspace @swaptrade/swap-demo
+
+      - name: Build example DApp
+        run: npm run build --workspace @swaptrade/swap-demo
+
+      - name: Verify no secrets are inlined into the bundle
+        # Vite inlines every VITE_-prefixed variable into the browser bundle, so
+        # the built output is the artifact that matters here, not the source. The
+        # demo has no secret-key code path at all; these greps make sure one is
+        # not reintroduced, whether by a hardcoded literal or by a new env var.
+        run: |
+          if grep -rEoh 'S[A-Z2-7]{55}' examples/swap-demo/dist/ | head -1 | grep -q .; then
+            echo "::error::A Stellar secret-key-shaped string was found in the build output."
+            exit 1
+          fi
+          echo "No secret-key-shaped strings in the bundle."
+
+          # A secret-reading env var would show up in the bundle by name.
+          if grep -rEoh 'VITE_[A-Z0-9_]*(SECRET|PRIVATE|SEED|MNEMONIC|PASSWORD)[A-Z0-9_]*' \
+              examples/swap-demo/dist/ | head -1 | grep -q .; then
+            echo "::error::The bundle references a secret-shaped VITE_ variable. Browser signing must go through a wallet, not an environment variable."
+            exit 1
+          fi
+          echo "No secret-shaped VITE_ variables in the bundle."
+
+          # And no source file may read one, even if the value happens to be
+          # unset in CI (which would leave no trace in the bundle).
+          if grep -rEn 'VITE_[A-Z0-9_]*(SECRET|PRIVATE|SEED|MNEMONIC|PASSWORD)' \
+              examples/swap-demo/src/ examples/swap-demo/*.ts | grep -q .; then
+            echo "::error::Source reads a secret-shaped VITE_ variable. Use the SDK signer abstraction with a browser wallet instead."
+            exit 1
+          fi
+          echo "No source file reads a secret-shaped VITE_ variable."
+
+  smoke:
+    name: Browser smoke test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    needs: build-and-test
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build SDK
+        run: npm run build --workspace @swaptrade/sdk
+
+      # Only Chromium: the demo uses no browser-specific APIs, so a matrix here
+      # would add minutes without adding coverage.
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+        working-directory: examples/swap-demo
+
+      - name: Run smoke test
+        run: npm run test:e2e --workspace @swaptrade/swap-demo
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: examples/swap-demo/playwright-report/
+          retention-days: 7

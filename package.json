@@ -1,0 +1,24 @@
+{
+  "name": "swaptrade-monorepo",
+  "version": "0.1.0",
+  "private": true,
+  "description": "npm workspace root for the SwapTrade TypeScript SDK and example DApp",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=20"
+  },
+  "workspaces": [
+    "packages/*",
+    "examples/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspace @swaptrade/sdk",
+    "build:demo": "npm run build --workspace @swaptrade/swap-demo",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "test:e2e": "npm run test:e2e --workspace @swaptrade/swap-demo",
+    "demo": "npm run dev --workspace @swaptrade/swap-demo",
+    "localnet:deploy": "bash scripts/localnet_deploy.sh",
+    "localnet:verify": "node --experimental-strip-types scripts/verify_localnet.ts"
+  }
+}

@@ -1,0 +1,169 @@
+/*
+ * Minimal styling. Issue #254 asks for a demonstration of the workflow, not a
+ * design system, so this stays small and dependency-free.
+ */
+:root {
+  --bg: #0f1115;
+  --panel: #171a21;
+  --border: #262b36;
+  --text: #e6e8ee;
+  --muted: #98a0b3;
+  --accent: #3d8bfd;
+  --warn: #f0a020;
+  --error: #ff6b6b;
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 15px/1.5 ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+}
+
+.app {
+  max-width: 46rem;
+  margin: 0 auto;
+  padding: 2rem 1rem 4rem;
+  display: grid;
+  gap: 1rem;
+}
+
+h1 {
+  margin: 0 0 0.25rem;
+  font-size: 1.5rem;
+}
+
+h2 {
+  margin: 0 0 0.75rem;
+  font-size: 1rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1rem;
+}
+
+.panel--warning {
+  border-color: var(--warn);
+}
+
+dl {
+  display: grid;
+  grid-template-columns: 9rem 1fr;
+  gap: 0.35rem 1rem;
+  margin: 0;
+}
+
+dt {
+  color: var(--muted);
+}
+
+dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.field {
+  display: grid;
+  gap: 0.25rem;
+  margin-bottom: 0.75rem;
+}
+
+label {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+input {
+  background: #0d0f14;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: inherit;
+  padding: 0.5rem 0.6rem;
+  font: inherit;
+}
+
+button {
+  background: var(--accent);
+  border: 0;
+  border-radius: 6px;
+  color: #fff;
+  cursor: pointer;
+  font: inherit;
+  padding: 0.5rem 0.9rem;
+}
+
+button:disabled {
+  background: #2b3140;
+  color: var(--muted);
+  cursor: not-allowed;
+}
+
+.steps {
+  display: grid;
+  gap: 0.5rem;
+  list-style: none;
+  margin: 0 0 1rem;
+  padding: 0;
+}
+
+ul {
+  margin: 0;
+  padding-left: 1.1rem;
+}
+
+li {
+  overflow-wrap: anywhere;
+}
+
+code {
+  background: #0d0f14;
+  border-radius: 4px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.85em;
+  padding: 0.1rem 0.3rem;
+}
+
+.badge {
+  background: #1e3a5f;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  margin: 0 0.4rem;
+  padding: 0.1rem 0.4rem;
+}
+
+.muted {
+  color: var(--muted);
+}
+
+/* A status line, not a boxed alert: colour carries the warning, so it stays
+ * visually lighter than `.alert` below. */
+.notice {
+  color: var(--warn);
+  margin: 0 0 1rem;
+}
+
+.alert {
+  border: 1px solid var(--error);
+  border-radius: 6px;
+  margin: 0 0 1rem;
+  padding: 0.7rem;
+}
+
+.alert strong {
+  text-transform: capitalize;
+}
+
+.alert p {
+  margin: 0.35rem 0 0;
+}
