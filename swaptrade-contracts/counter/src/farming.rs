@@ -93,7 +93,7 @@ impl FarmingManager {
         let mut pool_state = env
             .storage()
             .persistent()
-            .get(&FarmingKey::PoolState(pool_id))
+            .get::<_, PoolFarmState>(&FarmingKey::PoolState(pool_id))
             .unwrap_or_else(|| PoolFarmState {
                 total_staked_lp: 0,
                 reward_per_share_accumulator: 0,
@@ -139,7 +139,7 @@ impl FarmingManager {
         let mut global_total: i128 = env
             .storage()
             .persistent()
-            .get(&FarmingKey::TotalRewardsDistributed)
+            .get::<_, i128>(&FarmingKey::TotalRewardsDistributed)
             .unwrap_or(0);
         global_total += new_rewards;
         env.storage()
@@ -154,13 +154,13 @@ impl FarmingManager {
         let pool_state = env
             .storage()
             .persistent()
-            .get(&FarmingKey::PoolState(pool_id))
+            .get::<_, PoolFarmState>(&FarmingKey::PoolState(pool_id))
             .ok_or(SwapTradeError::LPPositionNotFound)?;
 
         let mut user_position = env
             .storage()
             .persistent()
-            .get(&FarmingKey::UserPosition(pool_id, user.clone()))
+            .get::<_, UserFarmPosition>(&FarmingKey::UserPosition(pool_id, user.clone()))
             .unwrap_or_else(|| UserFarmPosition {
                 staked_lp_amount: 0,
                 pending_rewards: 0,
@@ -209,7 +209,7 @@ impl FarmingManager {
         let mut pool_state = env
             .storage()
             .persistent()
-            .get(&FarmingKey::PoolState(pool_id))
+            .get::<_, PoolFarmState>(&FarmingKey::PoolState(pool_id))
             .unwrap_or_else(|| PoolFarmState {
                 total_staked_lp: 0,
                 reward_per_share_accumulator: 0,
@@ -222,7 +222,7 @@ impl FarmingManager {
         let mut user_position = env
             .storage()
             .persistent()
-            .get(&FarmingKey::UserPosition(pool_id, user.clone()))
+            .get::<_, UserFarmPosition>(&FarmingKey::UserPosition(pool_id, user.clone()))
             .unwrap_or_else(|| UserFarmPosition {
                 staked_lp_amount: 0,
                 pending_rewards: 0,
@@ -275,7 +275,7 @@ impl FarmingManager {
         let mut user_position = env
             .storage()
             .persistent()
-            .get(&FarmingKey::UserPosition(pool_id, user.clone()))
+            .get::<_, UserFarmPosition>(&FarmingKey::UserPosition(pool_id, user.clone()))
             .ok_or(SwapTradeError::LPPositionNotFound)?;
 
         if !user_position.is_active || user_position.staked_lp_amount < amount {
@@ -286,7 +286,7 @@ impl FarmingManager {
         let mut pool_state = env
             .storage()
             .persistent()
-            .get(&FarmingKey::PoolState(pool_id))
+            .get::<_, PoolFarmState>(&FarmingKey::PoolState(pool_id))
             .ok_or(SwapTradeError::LPPositionNotFound)?;
 
         // Update totals
@@ -308,7 +308,7 @@ impl FarmingManager {
 
         // Emit event
         env.events().publish(
-            (symbol_short!("LPUnstaked"), user, pool_id),
+            (symbol_short!("lp_unstk"), user, pool_id),
             (amount, env.ledger().timestamp() as i64),
         );
 
@@ -331,7 +331,7 @@ impl FarmingManager {
         let mut user_position = env
             .storage()
             .persistent()
-            .get(&FarmingKey::UserPosition(pool_id, user.clone()))
+            .get::<_, UserFarmPosition>(&FarmingKey::UserPosition(pool_id, user.clone()))
             .ok_or(SwapTradeError::LPPositionNotFound)?;
 
         if user_position.pending_rewards <= 0 {
@@ -350,7 +350,7 @@ impl FarmingManager {
 
         // Emit event
         env.events().publish(
-            (symbol_short!("RewardsClaimed"), user, pool_id),
+            (symbol_short!("rwrd_clm"), user, pool_id),
             (claimed_amount, env.ledger().timestamp() as i64),
         );
 
@@ -371,7 +371,7 @@ impl FarmingManager {
         let user_position = env
             .storage()
             .persistent()
-            .get(&FarmingKey::UserPosition(pool_id, user))
+            .get::<_, UserFarmPosition>(&FarmingKey::UserPosition(pool_id, user))
             .ok_or(SwapTradeError::LPPositionNotFound)?;
 
         Ok(user_position.pending_rewards)
@@ -403,7 +403,7 @@ impl FarmingManager {
         let mut pool_state = env
             .storage()
             .persistent()
-            .get(&FarmingKey::PoolState(pool_id))
+            .get::<_, PoolFarmState>(&FarmingKey::PoolState(pool_id))
             .unwrap_or_else(|| PoolFarmState {
                 total_staked_lp: 0,
                 reward_per_share_accumulator: 0,
@@ -420,7 +420,7 @@ impl FarmingManager {
 
         // Emit event
         env.events().publish(
-            (symbol_short!("EmissionRateUpdated"), pool_id),
+            (symbol_short!("emis_upd"), pool_id),
             (old_rate, new_emission_rate, env.ledger().timestamp() as i64),
         );
 
@@ -434,7 +434,7 @@ impl FarmingManager {
 
         env.storage()
             .persistent()
-            .get(&FarmingKey::PoolState(pool_id))
+            .get::<_, PoolFarmState>(&FarmingKey::PoolState(pool_id))
             .ok_or(SwapTradeError::LPPositionNotFound)
     }
 }
