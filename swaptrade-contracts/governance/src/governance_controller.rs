@@ -148,7 +148,7 @@ pub fn execute(
         return Err(GovernanceError::TimelockNotElapsed);
     }
 
-    if proposal.signatures.len() < proposal.threshold as usize {
+    if proposal.signatures.len() < proposal.threshold {
         return Err(GovernanceError::InsufficientSignatures);
     }
 
@@ -177,7 +177,7 @@ pub fn execute(
         }
         ProposalAction::RemoveSigner(signer) => {
             let mut signers = load_signers(env);
-            if let Some(pos) = signers.iter().position(|s| s == signer) {
+            if let Some(pos) = signers.iter().position(|s| s == *signer) {
                 signers.remove(pos as u32);
                 store_signers(env, &signers);
             }

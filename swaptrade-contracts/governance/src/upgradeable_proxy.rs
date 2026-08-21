@@ -8,7 +8,7 @@ use crate::storage::{
 pub fn initialize_proxy(env: &Env, implementation: Address, admin: Address) {
     let _ = admin;
     crate::storage::store_implementation(env, &implementation);
-    crate::storage::store_signers(env, &Vec::new(env));
+    crate::storage::store_signers(env, &soroban_sdk::Vec::new(env));
     crate::storage::store_threshold(env, 0);
     crate::storage::store_initialized(env, true);
     crate::storage::store_paused(env, false);
