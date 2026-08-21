@@ -234,6 +234,44 @@ pub fn cancel_proposal(
     Ok(())
 }
 
+pub fn approve_proposal(
+    env: &Env,
+    caller: Address,
+    proposal_id: u64,
+) -> Result<(), SwapTradeError> {
+    caller.require_auth();
+
+    let mut proposals: Map<u64, Proposal> =
+        env.storage().persistent().get(&PROPOSALS_KEY).unwrap();
+    let mut proposal = proposals
+        .get(proposal_id)
+        .ok_or(SwapTradeError::ProposalNotFound)?;
+
+    if proposal.executed {
+        return Err(SwapTradeError::ProposalAlreadyExecuted);
+    }
+
+    // Only authorized multisig signers may approve
+    let config = crate::admin::get_multi_sig_config(env)?;
+    if !config.signers.contains(&caller) {
+        return Err(SwapTradeError::NotAuthorized);
+    }
+
+    // Prevent duplicate approvals
+    if proposal.multi_sig.signers.contains(&caller) {
+        return Err(SwapTradeError::AlreadyApproved);
+    }
+
+    proposal.multi_sig.signers.push_back(caller.clone());
+    proposals.set(proposal_id, proposal.clone());
+    env.storage().persistent().set(&PROPOSALS_KEY, &proposals);
+
+    env.events()
+        .publish((symbol_short!("prop_approve"), proposal_id), caller);
+
+    Ok(())
+}
+
 pub fn execute_proposal(
     env: &Env,
     caller: Address,
