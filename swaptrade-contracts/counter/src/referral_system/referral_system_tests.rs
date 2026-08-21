@@ -1,14 +1,13 @@
 #[cfg(test)]
 mod tests {
-use soroban_sdk::{Env, Address, Symbol, symbol_short};
-    use soroban_sdk::testutils::{Address as _, Ledger as _};
+    use crate::errors::SwapTradeError;
     use crate::referral_system::{
-        register_referral, get_referral_stats, calculate_and_distribute_commission,
-        withdraw_commission, get_commission_balance, get_tier_for_volume,
-        ReferralInfo, ReferralLevel,
+        calculate_and_distribute_commission, get_commission_balance, get_referral_stats,
+        get_tier_for_volume, register_referral, withdraw_commission, ReferralInfo, ReferralLevel,
     };
     use crate::storage::DataKey;
-    use crate::errors::SwapTradeError;
+    use soroban_sdk::testutils::{Address as _, Ledger as _};
+    use soroban_sdk::{symbol_short, Address, Env, Symbol};
 
     fn setup_test_env() -> (Env, Address, Address, Address) {
         let env = Env::default();
