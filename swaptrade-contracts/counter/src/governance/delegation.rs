@@ -30,7 +30,7 @@ pub fn delegate_vote(
         .set(&DELEGATIONS_KEY, &delegations);
 
     env.events().publish(
-        (symbol_short!("del_vote")),
+        (symbol_short!("del_vote"),),
         (delegator, delegate),
     );
 
@@ -52,7 +52,7 @@ pub fn revoke_delegation(env: &Env, delegator: Address) -> Result<(), SwapTradeE
         .set(&DELEGATIONS_KEY, &delegations);
 
     env.events()
-        .publish((symbol_short!("del_revoke")), (delegator,));
+        .publish((symbol_short!("del_revk"),), (delegator,));
 
     Ok(())
 }

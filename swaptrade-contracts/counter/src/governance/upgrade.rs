@@ -50,9 +50,7 @@ impl Version {
         self.major == other.major && self.minor == other.minor && self.patch > other.patch
     }
 
-    pub fn to_string(&self) -> String {
-        format!("{}.{}.{}", self.major, self.minor, self.patch)
-    }
+
 }
 
 impl std::fmt::Display for Version {

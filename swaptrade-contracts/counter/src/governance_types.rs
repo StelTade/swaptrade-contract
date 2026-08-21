@@ -8,11 +8,11 @@ pub enum ProposalType {
     /// Change protocol parameters (fees, limits, etc.)
     ParameterChange(ParamKey, i128),
     /// Upgrade admin address
-    AdminUpgrade { new_admin: Address },
+    AdminUpgrade(Address),
     /// Emergency pause/unpause
-    EmergencyAction { pause: bool },
+    EmergencyAction(bool),
     /// Custom proposal with description
-    Custom { title: Symbol, description: Symbol },
+    Custom(Symbol, Symbol),
 }
 
 /// Governance proposal status
