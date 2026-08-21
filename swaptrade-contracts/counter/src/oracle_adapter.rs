@@ -252,11 +252,18 @@ impl OracleAdapter {
     }
 
     /// Get oracle configuration
-    fn get_config(env: &Env, pair: &(Symbol, Symbol)) -> Result<OracleConfig, ContractError> {
+    pub fn get_config(env: &Env, pair: &(Symbol, Symbol)) -> Result<OracleConfig, ContractError> {
         env.storage()
             .instance()
             .get(&Self::config_key(pair))
             .ok_or(ContractError::OracleNotConfigured)
+    }
+
+    /// Set oracle configuration
+    pub fn set_config(env: &Env, pair: &(Symbol, Symbol), config: OracleConfig) {
+        env.storage()
+            .instance()
+            .set(&Self::config_key(pair), &config);
     }
 
     /// Get oracle state

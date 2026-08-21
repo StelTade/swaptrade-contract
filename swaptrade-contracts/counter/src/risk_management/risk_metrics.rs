@@ -70,7 +70,7 @@ impl Default for RiskConfig {
         Self {
             max_position_per_user: 1000000000000, // 1M tokens (with 6 decimals)
             max_position_per_asset: 500000000000, // 500K tokens per asset
-            concentration_warning_threshold: 3000, // 30%
+            concentration_warn_threshold: 3000, // 30%
             concentration_limit_threshold: 5000,  // 50%
             circuit_breaker_threshold: 1500,      // 15%
             circuit_breaker_window: 3600,         // 1 hour

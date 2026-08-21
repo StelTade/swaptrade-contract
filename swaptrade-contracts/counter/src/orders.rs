@@ -10,6 +10,7 @@ pub enum OrderType {
     Limit,     // Execute only at specified price or better
     StopLoss,  // Execute when price reaches trigger (becomes market order)
     StopLimit, // Execute when price reaches trigger (becomes limit order)
+    Recurring, // Execute on a recurring schedule
 }
 
 /// Order status

@@ -26,7 +26,7 @@ pub struct OracleWrapper;
 
 impl AggregatorV3Interface for OracleWrapper {
     fn latest_round_data(&self, env: &Env, token_pair: (Symbol, Symbol)) -> Result<(i128, u64), ContractError> {
-        let price = crate::oracle_adapter::OracleAdapter::get_price(env, token_pair)?;
+        let price = crate::oracle_adapter::OracleAdapter::get_price(env, token_pair).map_err(|_| ContractError::InvalidPrice)?;
         let timestamp = env.ledger().timestamp();
         Ok((price as i128, timestamp))
     }

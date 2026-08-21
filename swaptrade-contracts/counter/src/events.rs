@@ -154,6 +154,43 @@ impl Events {
     }
 }
 
+// ── Free-function wrappers so callers can use `crate::events::function_name(…)` ──
+
+pub fn admin_paused(env: &Env, admin: Address, timestamp: i64) {
+    Events::admin_paused(env, admin, timestamp);
+}
+
+pub fn admin_resumed(env: &Env, admin: Address, timestamp: i64) {
+    Events::admin_resumed(env, admin, timestamp);
+}
+
+pub fn admin_changed(env: &Env, old_admin: Address, new_admin: Address, timestamp: i64) {
+    Events::admin_changed(env, old_admin, new_admin, timestamp);
+}
+
+pub fn fee_parameters_updated(
+    env: &Env,
+    pool_id: u64,
+    new_fee_rate: u32,
+    new_treasury: Option<Address>,
+) {
+    Events::fee_parameters_updated(env, pool_id, new_fee_rate, new_treasury);
+}
+
+pub fn fees_distributed(
+    env: &Env,
+    pool_id: u64,
+    token: Symbol,
+    amount: i128,
+    recipient: Address,
+) {
+    Events::fees_distributed(env, pool_id, token, amount, recipient);
+}
+
+pub fn fees_collected(env: &Env, token: Symbol, amount: i128, pool_id: u64) {
+    Events::fees_collected(env, token, amount, pool_id);
+}
+
 /// Emitted whenever an alert fires. Carries enough metadata for an
 /// off-chain indexer to route a push notification or webhook call.
 ///
