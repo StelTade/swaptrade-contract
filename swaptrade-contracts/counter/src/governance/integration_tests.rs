@@ -19,13 +19,13 @@ mod treasury_integration_tests {
             "eve".to_string(),
         ];
         let mut treasury = Treasury::new(signers, 3, 2);
-        treasury.deposit("XLM", 10_000_000, "foundation", 100).unwrap();
+        treasury
+            .deposit("XLM", 10_000_000, "foundation", 100)
+            .unwrap();
         treasury
             .deposit("USDC", 5_000_000, "foundation", 100)
             .unwrap();
-        treasury
-            .deposit("BTC", 100_000_000, "donor", 100)
-            .unwrap();
+        treasury.deposit("BTC", 100_000_000, "donor", 100).unwrap();
         treasury
     }
 
@@ -53,7 +53,9 @@ mod treasury_integration_tests {
             2
         );
         assert_eq!(
-            treasury.approve_proposal(&proposal_id, "carol", 300).unwrap(),
+            treasury
+                .approve_proposal(&proposal_id, "carol", 300)
+                .unwrap(),
             3
         );
 
@@ -244,7 +246,10 @@ mod upgrade_integration_tests {
                 UpgradeType::Minor,
                 "Add limit order support",
                 None,
-                vec!["Deploy new contract".to_string(), "Migrate users".to_string()],
+                vec![
+                    "Deploy new contract".to_string(),
+                    "Migrate users".to_string(),
+                ],
                 100,
             )
             .unwrap();
@@ -306,7 +311,10 @@ mod upgrade_integration_tests {
                 UpgradeType::Major,
                 "New AMM engine",
                 None,
-                vec!["Migrate all pools".to_string(), "Update oracles".to_string()],
+                vec![
+                    "Migrate all pools".to_string(),
+                    "Update oracles".to_string(),
+                ],
                 100,
             )
             .unwrap();
@@ -334,7 +342,15 @@ mod upgrade_integration_tests {
 
         // 1.0.0 -> 1.0.1 (patch)
         let id1 = mgr
-            .propose_upgrade("alice", Version::new(1, 0, 1), UpgradeType::Patch, "Fix", None, vec![], 100)
+            .propose_upgrade(
+                "alice",
+                Version::new(1, 0, 1),
+                UpgradeType::Patch,
+                "Fix",
+                None,
+                vec![],
+                100,
+            )
             .unwrap();
         mgr.approve_upgrade(id1, "bob", 200).unwrap();
         mgr.execute_upgrade(id1, 200 + 172800).unwrap();
@@ -342,7 +358,15 @@ mod upgrade_integration_tests {
 
         // 1.0.1 -> 1.1.0 (minor)
         let id2 = mgr
-            .propose_upgrade("alice", Version::new(1, 1, 0), UpgradeType::Minor, "Feature", None, vec![], 400 + 172800)
+            .propose_upgrade(
+                "alice",
+                Version::new(1, 1, 0),
+                UpgradeType::Minor,
+                "Feature",
+                None,
+                vec![],
+                400 + 172800,
+            )
             .unwrap();
         mgr.approve_upgrade(id2, "bob", 500 + 172800).unwrap();
         mgr.approve_upgrade(id2, "carol", 500 + 172800).unwrap();
@@ -351,7 +375,15 @@ mod upgrade_integration_tests {
 
         // 1.1.0 -> 2.0.0 (major)
         let id3 = mgr
-            .propose_upgrade("alice", Version::new(2, 0, 0), UpgradeType::Major, "Major", None, vec![], 500 + 172800 + 172800)
+            .propose_upgrade(
+                "alice",
+                Version::new(2, 0, 0),
+                UpgradeType::Major,
+                "Major",
+                None,
+                vec![],
+                500 + 172800 + 172800,
+            )
             .unwrap();
         for signer in ["bob", "carol", "dave", "eve"] {
             mgr.approve_upgrade(id3, signer, 600 + 172800 + 172800)
@@ -367,13 +399,29 @@ mod upgrade_integration_tests {
         let mut mgr = setup_upgrade_manager();
 
         let id1 = mgr
-            .propose_upgrade("alice", Version::new(2, 0, 0), UpgradeType::Major, "Old plan", None, vec![], 100)
+            .propose_upgrade(
+                "alice",
+                Version::new(2, 0, 0),
+                UpgradeType::Major,
+                "Old plan",
+                None,
+                vec![],
+                100,
+            )
             .unwrap();
         mgr.cancel_upgrade(id1, "bob", 200).unwrap();
 
         // New proposal with better plan
         let id2 = mgr
-            .propose_upgrade("alice", Version::new(2, 0, 0), UpgradeType::Major, "New plan v2", None, vec![], 300)
+            .propose_upgrade(
+                "alice",
+                Version::new(2, 0, 0),
+                UpgradeType::Major,
+                "New plan v2",
+                None,
+                vec![],
+                300,
+            )
             .unwrap();
 
         assert_ne!(id1, id2);
@@ -409,20 +457,38 @@ mod emergency_integration_tests {
         let mut ctrl = setup_emergency_controller();
 
         // Step 1: Low-level warning (applies immediately for Low)
-        ctrl.set_emergency_level("alice", EmergencyLevel::Low, "Suspicious pattern detected", 100, None)
-            .unwrap();
+        ctrl.set_emergency_level(
+            "alice",
+            EmergencyLevel::Low,
+            "Suspicious pattern detected",
+            100,
+            None,
+        )
+        .unwrap();
         assert_eq!(ctrl.current_level(), EmergencyLevel::Low);
         assert!(!ctrl.is_operation_allowed(&OperationType::Swap));
         assert!(ctrl.is_operation_allowed(&OperationType::LpWithdraw));
 
         // Step 2: Escalate after cooldown
-        ctrl.set_emergency_level("bob", EmergencyLevel::Medium, "Confirmed exploit attempt", 601, None)
-            .unwrap();
+        ctrl.set_emergency_level(
+            "bob",
+            EmergencyLevel::Medium,
+            "Confirmed exploit attempt",
+            601,
+            None,
+        )
+        .unwrap();
         assert_eq!(ctrl.current_level(), EmergencyLevel::Medium);
 
         // Step 3: Full emergency (Critical needs multisig approval)
         let id = ctrl
-            .set_emergency_level("carol", EmergencyLevel::Critical, "Active attack", 1200, None)
+            .set_emergency_level(
+                "carol",
+                EmergencyLevel::Critical,
+                "Active attack",
+                1200,
+                None,
+            )
             .unwrap();
         // Still Medium - Critical needs 3 approvals
         assert_eq!(ctrl.current_level(), EmergencyLevel::Medium);
@@ -534,12 +600,10 @@ mod rewards_integration_tests {
 
         // Alice is very active: 10 votes, 3 proposals
         for i in 0..10 {
-            mgr.record_vote_cast("alice", 200, 100 + i * 10)
-                .unwrap();
+            mgr.record_vote_cast("alice", 200, 100 + i * 10).unwrap();
         }
         for i in 0..3 {
-            mgr.record_proposal_created("alice", 100 + i * 10)
-                .unwrap();
+            mgr.record_proposal_created("alice", 100 + i * 10).unwrap();
         }
 
         // Bob is moderately active: 5 votes, 1 proposal
@@ -624,10 +688,10 @@ mod rewards_integration_tests {
 
 #[cfg(test)]
 mod end_to_end_governance_tests {
-    use super::super::treasury::*;
-    use super::super::upgrade::*;
     use super::super::emergency::*;
     use super::super::rewards::*;
+    use super::super::treasury::*;
+    use super::super::upgrade::*;
 
     /// Simulates a complete governance lifecycle:
     /// 1. Community proposes a protocol upgrade
@@ -660,7 +724,9 @@ mod end_to_end_governance_tests {
         let mut rewards = RewardManager::new(RewardConfig::default(), 100);
 
         // Setup: Fund treasury
-        treasury.deposit("XLM", 10_000_000, "foundation", 100).unwrap();
+        treasury
+            .deposit("XLM", 10_000_000, "foundation", 100)
+            .unwrap();
 
         // Phase 1: Governance discussion and voting
         rewards.record_proposal_created("alice", 100).unwrap();
@@ -683,13 +749,21 @@ mod end_to_end_governance_tests {
             )
             .unwrap();
         treasury.approve_proposal(&treasury_id, "bob", 400).unwrap();
-        treasury.approve_proposal(&treasury_id, "carol", 400).unwrap();
+        treasury
+            .approve_proposal(&treasury_id, "carol", 400)
+            .unwrap();
         treasury.execute_proposal(&treasury_id, 500).unwrap();
         assert_eq!(treasury.balance_of("XLM"), 8_000_000);
 
         // Phase 3: Emergency protection during upgrade window
         let em_id = emergency
-            .set_emergency_level("alice", EmergencyLevel::Medium, "Pre-upgrade safety", 600, Some(3600))
+            .set_emergency_level(
+                "alice",
+                EmergencyLevel::Medium,
+                "Pre-upgrade safety",
+                600,
+                Some(3600),
+            )
             .unwrap();
         assert!(!emergency.is_operation_allowed(&OperationType::Swap));
 
@@ -701,20 +775,29 @@ mod end_to_end_governance_tests {
                 UpgradeType::Major,
                 "New AMM engine with governance",
                 None,
-                vec!["Deploy v2 contract".to_string(), "Migrate state".to_string()],
+                vec![
+                    "Deploy v2 contract".to_string(),
+                    "Migrate state".to_string(),
+                ],
                 600,
             )
             .unwrap();
         upgrade_mgr.approve_upgrade(upgrade_id, "bob", 700).unwrap();
-        upgrade_mgr.approve_upgrade(upgrade_id, "carol", 700).unwrap();
-        upgrade_mgr.approve_upgrade(upgrade_id, "dave", 700).unwrap();
+        upgrade_mgr
+            .approve_upgrade(upgrade_id, "carol", 700)
+            .unwrap();
+        upgrade_mgr
+            .approve_upgrade(upgrade_id, "dave", 700)
+            .unwrap();
         upgrade_mgr.approve_upgrade(upgrade_id, "eve", 700).unwrap();
         upgrade_mgr
             .execute_upgrade(upgrade_id, 700 + 172800)
             .unwrap();
 
         // Phase 5: Lift emergency after successful upgrade
-        emergency.lift_emergency(em_id, "alice", 700 + 172801).unwrap();
+        emergency
+            .lift_emergency(em_id, "alice", 700 + 172801)
+            .unwrap();
         assert!(emergency.is_operation_allowed(&OperationType::Swap));
 
         // Phase 6: Distribute governance rewards

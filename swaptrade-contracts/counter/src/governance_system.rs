@@ -1,12 +1,14 @@
-use soroban_sdk::{contracttype, symbol_short, Address, Env, Symbol, Vec, Map};
+use soroban_sdk::{contracttype, symbol_short, Address, Env, Map, Symbol, Vec};
 
 use crate::errors::SwapTradeError;
-use crate::storage::{PROPOSALS_KEY, PROPOSAL_STATE_KEY, TOTAL_SUPPLY_KEY, BALANCES_KEY, GOV_COUNCIL_KEY};
-use crate::governance::quadratic_voting::{self, Vote};
-use crate::governance::multi_sig::MultiSig;
-use crate::governance_params::{GovernanceParams, ParamKey};
 use crate::governance::delegation;
+use crate::governance::multi_sig::MultiSig;
+use crate::governance::quadratic_voting::{self, Vote};
+use crate::governance_params::{GovernanceParams, ParamKey};
 use crate::governance_types;
+use crate::storage::{
+    BALANCES_KEY, GOV_COUNCIL_KEY, PROPOSALS_KEY, PROPOSAL_STATE_KEY, TOTAL_SUPPLY_KEY,
+};
 
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -45,10 +47,15 @@ pub fn create_proposal(
 ) -> Result<u64, SwapTradeError> {
     caller.require_auth();
 
-    let total_supply: u64 = env.storage().persistent().get(&TOTAL_SUPPLY_KEY).unwrap_or(0);
+    let total_supply: u64 = env
+        .storage()
+        .persistent()
+        .get(&TOTAL_SUPPLY_KEY)
+        .unwrap_or(0);
     let balance = get_token_balance(env, &caller);
 
-    if balance < total_supply / 100 { // 1% of total supply
+    if balance < total_supply / 100 {
+        // 1% of total supply
         return Err(SwapTradeError::InsufficientBalance);
     }
 
@@ -95,10 +102,8 @@ pub fn create_proposal(
         .persistent()
         .set(&PROPOSAL_STATE_KEY, &proposal_state);
 
-    env.events().publish(
-        (symbol_short!("prop_new"), proposal_id),
-        proposal,
-    );
+    env.events()
+        .publish((symbol_short!("prop_new"), proposal_id), proposal);
 
     Ok(proposal_id)
 }
@@ -111,8 +116,7 @@ pub fn cast_vote(
 ) -> Result<(), SwapTradeError> {
     caller.require_auth();
 
-    let mut proposals: Map<u64, Proposal> =
-        env.storage().persistent().get(&PROPOSALS_KEY).unwrap();
+    let mut proposals: Map<u64, Proposal> = env.storage().persistent().get(&PROPOSALS_KEY).unwrap();
     let proposal = proposals
         .get(proposal_id)
         .ok_or(SwapTradeError::ProposalNotFound)?;
@@ -144,7 +148,11 @@ pub fn cast_vote(
 
     let vote = Vote {
         voter: caller.clone(),
-        vote_weight: if in_favor { vote_weight as i64 } else { -(vote_weight as i64) },
+        vote_weight: if in_favor {
+            vote_weight as i64
+        } else {
+            -(vote_weight as i64)
+        },
     };
 
     state.votes.push_back(vote);
@@ -154,32 +162,35 @@ pub fn cast_vote(
         .set(&PROPOSAL_STATE_KEY, &proposal_state);
 
     let (votes_for, votes_against) = quadratic_voting::tally_votes(&state.votes);
-    let total_supply: u64 = env.storage().persistent().get(&TOTAL_SUPPLY_KEY).unwrap_or(0);
+    let total_supply: u64 = env
+        .storage()
+        .persistent()
+        .get(&TOTAL_SUPPLY_KEY)
+        .unwrap_or(0);
     let total_votes = votes_for + votes_against;
 
-    if total_votes >= total_supply * 30 / 100 && votes_for * 100 >= (votes_for + votes_against) * 60 {
-        let mut proposals: Map<u64, Proposal> = env.storage().persistent().get(&PROPOSALS_KEY).unwrap();
+    if total_votes >= total_supply * 30 / 100 && votes_for * 100 >= (votes_for + votes_against) * 60
+    {
+        let mut proposals: Map<u64, Proposal> =
+            env.storage().persistent().get(&PROPOSALS_KEY).unwrap();
         let mut proposal = proposals.get(proposal_id).unwrap();
         proposal.executable_at = env.ledger().timestamp() + 172800; // 48 hours
         proposals.set(proposal_id, proposal.clone());
         env.storage().persistent().set(&PROPOSALS_KEY, &proposals);
     }
 
-    env.events()
-        .publish((symbol_short!("prop_vote"), proposal_id), (caller, in_favor));
+    env.events().publish(
+        (symbol_short!("prop_vote"), proposal_id),
+        (caller, in_favor),
+    );
 
     Ok(())
 }
 
-pub fn sign_proposal(
-    env: &Env,
-    caller: Address,
-    proposal_id: u64,
-) -> Result<(), SwapTradeError> {
+pub fn sign_proposal(env: &Env, caller: Address, proposal_id: u64) -> Result<(), SwapTradeError> {
     caller.require_auth();
 
-    let mut proposals: Map<u64, Proposal> =
-        env.storage().persistent().get(&PROPOSALS_KEY).unwrap();
+    let mut proposals: Map<u64, Proposal> = env.storage().persistent().get(&PROPOSALS_KEY).unwrap();
     let mut proposal = proposals
         .get(proposal_id)
         .ok_or(SwapTradeError::ProposalNotFound)?;
@@ -212,15 +223,10 @@ pub fn approve_proposal(
     sign_proposal(env, caller, proposal_id)
 }
 
-pub fn cancel_proposal(
-    env: &Env,
-    caller: Address,
-    proposal_id: u64,
-) -> Result<(), SwapTradeError> {
+pub fn cancel_proposal(env: &Env, caller: Address, proposal_id: u64) -> Result<(), SwapTradeError> {
     caller.require_auth();
 
-    let mut proposals: Map<u64, Proposal> =
-        env.storage().persistent().get(&PROPOSALS_KEY).unwrap();
+    let mut proposals: Map<u64, Proposal> = env.storage().persistent().get(&PROPOSALS_KEY).unwrap();
     let mut proposal = proposals
         .get(proposal_id)
         .ok_or(SwapTradeError::ProposalNotFound)?;
@@ -251,8 +257,7 @@ pub fn execute_proposal(
 ) -> Result<(), SwapTradeError> {
     caller.require_auth();
 
-    let mut proposals: Map<u64, Proposal> =
-        env.storage().persistent().get(&PROPOSALS_KEY).unwrap();
+    let mut proposals: Map<u64, Proposal> = env.storage().persistent().get(&PROPOSALS_KEY).unwrap();
     let mut proposal = proposals
         .get(proposal_id)
         .ok_or(SwapTradeError::ProposalNotFound)?;
@@ -276,28 +281,42 @@ pub fn execute_proposal(
     let (votes_for, votes_against) = quadratic_voting::tally_votes(&state.votes);
 
     let total_votes = votes_for + votes_against;
-    let total_supply: u64 = env.storage().persistent().get(&TOTAL_SUPPLY_KEY).unwrap_or(0);
+    let total_supply: u64 = env
+        .storage()
+        .persistent()
+        .get(&TOTAL_SUPPLY_KEY)
+        .unwrap_or(0);
 
-    if total_votes < total_supply * 30 / 100 { // 30% quorum
+    if total_votes < total_supply * 30 / 100 {
+        // 30% quorum
         return Err(SwapTradeError::QuorumNotReached);
     }
 
-    if votes_for * 100 < (votes_for + votes_against) * 60 { // 60% approval
+    if votes_for * 100 < (votes_for + votes_against) * 60 {
+        // 60% approval
         return Err(SwapTradeError::ProposalFailed);
     }
 
     match proposal.action {
         ProposalAction::PauseTrading => {
-            env.storage().persistent().set(&crate::storage::PAUSED_KEY, &true);
+            env.storage()
+                .persistent()
+                .set(&crate::storage::PAUSED_KEY, &true);
         }
         ProposalAction::ResumeTrading => {
-            env.storage().persistent().set(&crate::storage::PAUSED_KEY, &false);
+            env.storage()
+                .persistent()
+                .set(&crate::storage::PAUSED_KEY, &false);
         }
         ProposalAction::SetAdmin(ref new_admin) => {
-            env.storage().persistent().set(&crate::storage::ADMIN_KEY, &new_admin);
+            env.storage()
+                .persistent()
+                .set(&crate::storage::ADMIN_KEY, &new_admin);
         }
         ProposalAction::SetTreasury(ref new_treasury) => {
-            env.storage().persistent().set(&crate::storage::DEFAULT_TREASURY_KEY, &new_treasury);
+            env.storage()
+                .persistent()
+                .set(&crate::storage::DEFAULT_TREASURY_KEY, &new_treasury);
         }
         ProposalAction::UpdatePoolFeeTier(pool_id, new_fee_tier) => {
             crate::update_pool_fee_tier(env.clone(), caller.clone(), pool_id, new_fee_tier)?
@@ -318,7 +337,11 @@ pub fn execute_proposal(
 }
 
 fn get_token_balance(env: &Env, user: &Address) -> u64 {
-    let balances: Map<Address, u64> = env.storage().persistent().get(&BALANCES_KEY).unwrap_or_else(|| Map::new(env));
+    let balances: Map<Address, u64> = env
+        .storage()
+        .persistent()
+        .get(&BALANCES_KEY)
+        .unwrap_or_else(|| Map::new(env));
     balances.get(user.clone()).unwrap_or(0)
 }
 
@@ -361,10 +384,13 @@ impl GovernanceSystem {
         env: &Env,
         proposal_id: u64,
     ) -> Result<governance_types::Proposal, SwapTradeError> {
-        let proposals: Map<u64, Proposal> =
-            env.storage().persistent().get(&PROPOSALS_KEY)
-                .ok_or(SwapTradeError::ProposalNotFound)?;
-        let p = proposals.get(proposal_id)
+        let proposals: Map<u64, Proposal> = env
+            .storage()
+            .persistent()
+            .get(&PROPOSALS_KEY)
+            .ok_or(SwapTradeError::ProposalNotFound)?;
+        let p = proposals
+            .get(proposal_id)
             .ok_or(SwapTradeError::ProposalNotFound)?;
 
         // Convert internal Proposal to governance_types::Proposal
@@ -386,7 +412,11 @@ impl GovernanceSystem {
             description: Symbol::new(env, "proposal"),
             start_time: p.created_at,
             end_time: p.executable_at,
-            execution_time: if p.executed { Some(p.executable_at) } else { None },
+            execution_time: if p.executed {
+                Some(p.executable_at)
+            } else {
+                None
+            },
             status,
             votes_for: 0,
             votes_against: 0,
@@ -434,8 +464,12 @@ mod tests {
         env.as_contract(&contract_id, || {
             set_admin(&env, &admin);
             env.storage().persistent().set(&BALANCES_KEY, &balances);
-            env.storage().persistent().set(&TOTAL_SUPPLY_KEY, &total_supply);
-            env.storage().persistent().set(&GOV_COUNCIL_KEY, &gov_council);
+            env.storage()
+                .persistent()
+                .set(&TOTAL_SUPPLY_KEY, &total_supply);
+            env.storage()
+                .persistent()
+                .set(&GOV_COUNCIL_KEY, &gov_council);
         });
 
         (env, contract_id, admin, users)
@@ -445,7 +479,8 @@ mod tests {
     fn test_create_proposal() {
         let (env, contract_id, admin, users) = setup();
         env.as_contract(&contract_id, || {
-            let id = create_proposal(&env, users.get(9).unwrap(), ProposalAction::PauseTrading).unwrap();
+            let id =
+                create_proposal(&env, users.get(9).unwrap(), ProposalAction::PauseTrading).unwrap();
             assert_eq!(id, 0);
         });
     }
@@ -454,7 +489,8 @@ mod tests {
     fn test_cast_vote() {
         let (env, contract_id, admin, users) = setup();
         env.as_contract(&contract_id, || {
-            let id = create_proposal(&env, users.get(9).unwrap(), ProposalAction::PauseTrading).unwrap();
+            let id =
+                create_proposal(&env, users.get(9).unwrap(), ProposalAction::PauseTrading).unwrap();
             cast_vote(&env, users.get(0).unwrap(), id, true).unwrap();
         });
     }
@@ -463,7 +499,8 @@ mod tests {
     fn test_execute_proposal() {
         let (env, contract_id, admin, users) = setup();
         env.as_contract(&contract_id, || {
-            let id = create_proposal(&env, users.get(9).unwrap(), ProposalAction::PauseTrading).unwrap();
+            let id =
+                create_proposal(&env, users.get(9).unwrap(), ProposalAction::PauseTrading).unwrap();
 
             for i in 0..7 {
                 cast_vote(&env, users.get(i).unwrap(), id, true).unwrap();
@@ -473,7 +510,8 @@ mod tests {
                 cast_vote(&env, users.get(i).unwrap(), id, false).unwrap();
             }
 
-            let mut proposals: Map<u64, Proposal> = env.storage().persistent().get(&PROPOSALS_KEY).unwrap();
+            let mut proposals: Map<u64, Proposal> =
+                env.storage().persistent().get(&PROPOSALS_KEY).unwrap();
             let mut proposal = proposals.get(id).unwrap();
 
             for i in 0..5 {

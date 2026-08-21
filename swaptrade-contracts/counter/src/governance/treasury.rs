@@ -292,10 +292,7 @@ impl Treasury {
 
     /// Get the balance of a specific asset.
     pub fn balance_of(&self, asset: &str) -> u128 {
-        self.balances
-            .get(asset)
-            .map(|b| b.balance)
-            .unwrap_or(0)
+        self.balances.get(asset).map(|b| b.balance).unwrap_or(0)
     }
 
     /// Get the total value of all assets (simplified - counts unique assets).
@@ -473,11 +470,7 @@ impl Treasury {
     }
 
     /// Execute an approved treasury proposal.
-    pub fn execute_proposal(
-        &mut self,
-        proposal_id: &OperationId,
-        now: u64,
-    ) -> Result<(), String> {
+    pub fn execute_proposal(&mut self, proposal_id: &OperationId, now: u64) -> Result<(), String> {
         // Validate and extract needed data first to avoid borrow conflicts
         let (asset, amount, recipient) = {
             let proposal = self
@@ -678,7 +671,9 @@ fn simple_hash(data: &[u8]) -> [u8; 32] {
     let mut hash: [u8; 32] = [0x6b; 32]; // Init with a non-zero constant
     for (i, &byte) in data.iter().enumerate() {
         hash[i % 32] = hash[i % 32].wrapping_mul(31).wrapping_add(byte);
-        hash[(i + 13) % 32] = hash[(i + 13) % 32].wrapping_mul(17).wrapping_add(byte ^ 0xAA);
+        hash[(i + 13) % 32] = hash[(i + 13) % 32]
+            .wrapping_mul(17)
+            .wrapping_add(byte ^ 0xAA);
     }
     hash
 }
@@ -718,7 +713,9 @@ mod tests {
     #[test]
     fn test_deposit() {
         let mut treasury = setup();
-        treasury.deposit("XLM", 1_000_000, "foundation", 100).unwrap();
+        treasury
+            .deposit("XLM", 1_000_000, "foundation", 100)
+            .unwrap();
         assert_eq!(treasury.balance_of("XLM"), 1_000_000);
     }
 
@@ -733,7 +730,9 @@ mod tests {
         let mut treasury = setup();
         treasury.deposit("XLM", 500_000, "foundation", 100).unwrap();
         treasury.deposit("XLM", 300_000, "donor", 200).unwrap();
-        treasury.deposit("USDC", 100_000, "foundation", 300).unwrap();
+        treasury
+            .deposit("USDC", 100_000, "foundation", 300)
+            .unwrap();
 
         assert_eq!(treasury.balance_of("XLM"), 800_000);
         assert_eq!(treasury.balance_of("USDC"), 100_000);
@@ -743,7 +742,9 @@ mod tests {
     #[test]
     fn test_create_proposal() {
         let mut treasury = setup();
-        treasury.deposit("XLM", 1_000_000, "foundation", 100).unwrap();
+        treasury
+            .deposit("XLM", 1_000_000, "foundation", 100)
+            .unwrap();
 
         let proposal_id = treasury
             .create_proposal(
@@ -768,7 +769,9 @@ mod tests {
     #[test]
     fn test_non_signer_cannot_propose() {
         let mut treasury = setup();
-        treasury.deposit("XLM", 1_000_000, "foundation", 100).unwrap();
+        treasury
+            .deposit("XLM", 1_000_000, "foundation", 100)
+            .unwrap();
 
         let result = treasury.create_proposal(
             "frank",
@@ -806,7 +809,9 @@ mod tests {
     #[test]
     fn test_approve_proposal() {
         let mut treasury = setup();
-        treasury.deposit("XLM", 1_000_000, "foundation", 100).unwrap();
+        treasury
+            .deposit("XLM", 1_000_000, "foundation", 100)
+            .unwrap();
 
         let proposal_id = treasury
             .create_proposal(
@@ -826,7 +831,9 @@ mod tests {
         assert_eq!(count, 2);
 
         // Carol approves - reaches threshold
-        let count = treasury.approve_proposal(&proposal_id, "carol", 300).unwrap();
+        let count = treasury
+            .approve_proposal(&proposal_id, "carol", 300)
+            .unwrap();
         assert_eq!(count, 3);
 
         // Proposal should now be approved
@@ -837,7 +844,9 @@ mod tests {
     #[test]
     fn test_duplicate_approval_fails() {
         let mut treasury = setup();
-        treasury.deposit("XLM", 1_000_000, "foundation", 100).unwrap();
+        treasury
+            .deposit("XLM", 1_000_000, "foundation", 100)
+            .unwrap();
 
         let proposal_id = treasury
             .create_proposal(
@@ -861,7 +870,9 @@ mod tests {
     #[test]
     fn test_execute_proposal() {
         let mut treasury = setup();
-        treasury.deposit("XLM", 1_000_000, "foundation", 100).unwrap();
+        treasury
+            .deposit("XLM", 1_000_000, "foundation", 100)
+            .unwrap();
 
         let proposal_id = treasury
             .create_proposal(
@@ -877,7 +888,9 @@ mod tests {
             .unwrap();
 
         treasury.approve_proposal(&proposal_id, "bob", 300).unwrap();
-        treasury.approve_proposal(&proposal_id, "carol", 300).unwrap();
+        treasury
+            .approve_proposal(&proposal_id, "carol", 300)
+            .unwrap();
 
         treasury.execute_proposal(&proposal_id, 400).unwrap();
 
@@ -890,7 +903,9 @@ mod tests {
     #[test]
     fn test_execute_unapproved_proposal_fails() {
         let mut treasury = setup();
-        treasury.deposit("XLM", 1_000_000, "foundation", 100).unwrap();
+        treasury
+            .deposit("XLM", 1_000_000, "foundation", 100)
+            .unwrap();
 
         let proposal_id = treasury
             .create_proposal(
@@ -913,7 +928,9 @@ mod tests {
     #[test]
     fn test_expired_proposal_rejected() {
         let mut treasury = setup();
-        treasury.deposit("XLM", 1_000_000, "foundation", 100).unwrap();
+        treasury
+            .deposit("XLM", 1_000_000, "foundation", 100)
+            .unwrap();
 
         let proposal_id = treasury
             .create_proposal(
@@ -937,7 +954,9 @@ mod tests {
     #[test]
     fn test_reject_proposal() {
         let mut treasury = setup();
-        treasury.deposit("XLM", 1_000_000, "foundation", 100).unwrap();
+        treasury
+            .deposit("XLM", 1_000_000, "foundation", 100)
+            .unwrap();
 
         let proposal_id = treasury
             .create_proposal(
@@ -963,7 +982,9 @@ mod tests {
     #[test]
     fn test_emergency_withdrawal_lower_threshold() {
         let mut treasury = setup();
-        treasury.deposit("XLM", 1_000_000, "foundation", 100).unwrap();
+        treasury
+            .deposit("XLM", 1_000_000, "foundation", 100)
+            .unwrap();
 
         let proposal_id = treasury
             .create_proposal(
@@ -992,7 +1013,9 @@ mod tests {
     #[test]
     fn test_spending_limit() {
         let mut treasury = setup();
-        treasury.deposit("XLM", 10_000_000, "foundation", 100).unwrap();
+        treasury
+            .deposit("XLM", 10_000_000, "foundation", 100)
+            .unwrap();
 
         // Set limit: 500,000 XLM per day
         treasury.set_spending_limit("XLM", 500_000, 86400, 200);
@@ -1014,7 +1037,9 @@ mod tests {
             )
             .unwrap();
         treasury.approve_proposal(&proposal_id, "bob", 200).unwrap();
-        treasury.approve_proposal(&proposal_id, "carol", 200).unwrap();
+        treasury
+            .approve_proposal(&proposal_id, "carol", 200)
+            .unwrap();
         treasury.execute_proposal(&proposal_id, 250).unwrap();
 
         // Now limit should have 200,000 remaining
@@ -1025,7 +1050,9 @@ mod tests {
     #[test]
     fn test_spending_limit_resets_after_period() {
         let mut treasury = setup();
-        treasury.deposit("XLM", 10_000_000, "foundation", 100).unwrap();
+        treasury
+            .deposit("XLM", 10_000_000, "foundation", 100)
+            .unwrap();
 
         treasury.set_spending_limit("XLM", 500_000, 86400, 100);
 
@@ -1067,11 +1094,7 @@ mod tests {
 
     #[test]
     fn test_cannot_remove_below_threshold() {
-        let signers = vec![
-            "alice".to_string(),
-            "bob".to_string(),
-            "carol".to_string(),
-        ];
+        let signers = vec!["alice".to_string(), "bob".to_string(), "carol".to_string()];
         let mut treasury = Treasury::new(signers, 3, 1);
         let result = treasury.remove_signer("carol");
         assert!(result.is_err());
@@ -1095,7 +1118,9 @@ mod tests {
     #[test]
     fn test_audit_trail_integrity() {
         let mut treasury = setup();
-        treasury.deposit("XLM", 1_000_000, "foundation", 100).unwrap();
+        treasury
+            .deposit("XLM", 1_000_000, "foundation", 100)
+            .unwrap();
 
         let id = treasury
             .create_proposal(
@@ -1120,7 +1145,9 @@ mod tests {
     #[test]
     fn test_pending_proposals() {
         let mut treasury = setup();
-        treasury.deposit("XLM", 1_000_000, "foundation", 100).unwrap();
+        treasury
+            .deposit("XLM", 1_000_000, "foundation", 100)
+            .unwrap();
 
         let id1 = treasury
             .create_proposal(
@@ -1160,7 +1187,9 @@ mod tests {
     #[test]
     fn test_non_signer_cannot_approve() {
         let mut treasury = setup();
-        treasury.deposit("XLM", 1_000_000, "foundation", 100).unwrap();
+        treasury
+            .deposit("XLM", 1_000_000, "foundation", 100)
+            .unwrap();
 
         let id = treasury
             .create_proposal(
@@ -1182,7 +1211,9 @@ mod tests {
     #[test]
     fn test_double_execution_fails() {
         let mut treasury = setup();
-        treasury.deposit("XLM", 1_000_000, "foundation", 100).unwrap();
+        treasury
+            .deposit("XLM", 1_000_000, "foundation", 100)
+            .unwrap();
 
         let id = treasury
             .create_proposal(

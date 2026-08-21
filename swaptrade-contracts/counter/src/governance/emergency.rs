@@ -144,9 +144,9 @@ impl Default for EmergencyConfig {
             signers: Vec::new(),
             standard_threshold: 2,
             critical_threshold: 3,
-            default_expiry_secs: 3600,      // 1 hour
-            max_expiry_secs: 86400,         // 24 hours
-            escalation_cooldown_secs: 300,   // 5 minutes
+            default_expiry_secs: 3600,     // 1 hour
+            max_expiry_secs: 86400,        // 24 hours
+            escalation_cooldown_secs: 300, // 5 minutes
         }
     }
 }
@@ -276,7 +276,10 @@ impl EmergencyController {
             // Need more approvals, store as pending
             self.actions.insert(id, action);
             self.log_action(
-                EmergencyAuditAction::LevelSet { level, action_id: id },
+                EmergencyAuditAction::LevelSet {
+                    level,
+                    action_id: id,
+                },
                 now,
             );
             return Ok(id);
@@ -287,7 +290,10 @@ impl EmergencyController {
         self.last_escalation_at = now;
         self.actions.insert(id, action);
         self.log_action(
-            EmergencyAuditAction::LevelSet { level, action_id: id },
+            EmergencyAuditAction::LevelSet {
+                level,
+                action_id: id,
+            },
             now,
         );
 
@@ -305,10 +311,7 @@ impl EmergencyController {
             return Err("only authorized signers can approve".to_string());
         }
 
-        let action = self
-            .actions
-            .get_mut(&action_id)
-            .ok_or("action not found")?;
+        let action = self.actions.get_mut(&action_id).ok_or("action not found")?;
 
         if action.status != EmergencyActionStatus::Active {
             return Err("action is not active".to_string());
@@ -322,9 +325,7 @@ impl EmergencyController {
         let count = action.approvals.len();
 
         // Check if threshold reached
-        if count >= action.required_approvals
-            && self.current_level < action.level
-        {
+        if count >= action.required_approvals && self.current_level < action.level {
             self.current_level = action.level;
             self.last_escalation_at = now;
         }
@@ -333,20 +334,12 @@ impl EmergencyController {
     }
 
     /// Lift a specific emergency action.
-    pub fn lift_emergency(
-        &mut self,
-        action_id: u64,
-        signer: &str,
-        now: u64,
-    ) -> Result<(), String> {
+    pub fn lift_emergency(&mut self, action_id: u64, signer: &str, now: u64) -> Result<(), String> {
         if !self.config.signers.contains(&signer.to_string()) {
             return Err("only authorized signers can lift emergencies".to_string());
         }
 
-        let action = self
-            .actions
-            .get_mut(&action_id)
-            .ok_or("action not found")?;
+        let action = self.actions.get_mut(&action_id).ok_or("action not found")?;
 
         if action.status != EmergencyActionStatus::Active {
             return Err("action is not active".to_string());
@@ -357,10 +350,7 @@ impl EmergencyController {
         // Recalculate current level from remaining active actions
         self.recalculate_level();
 
-        self.log_action(
-            EmergencyAuditAction::LevelLifted { action_id },
-            now,
-        );
+        self.log_action(EmergencyAuditAction::LevelLifted { action_id }, now);
 
         Ok(())
     }
@@ -589,7 +579,13 @@ mod tests {
     fn test_set_low_emergency() {
         let mut ctrl = setup();
         let id = ctrl
-            .set_emergency_level("alice", EmergencyLevel::Low, "Suspicious activity", 100, None)
+            .set_emergency_level(
+                "alice",
+                EmergencyLevel::Low,
+                "Suspicious activity",
+                100,
+                None,
+            )
             .unwrap();
 
         assert_eq!(ctrl.current_level(), EmergencyLevel::Low);
@@ -627,8 +623,7 @@ mod tests {
     #[test]
     fn test_non_signer_cannot_set_emergency() {
         let mut ctrl = setup();
-        let result =
-            ctrl.set_emergency_level("frank", EmergencyLevel::High, "test", 100, None);
+        let result = ctrl.set_emergency_level("frank", EmergencyLevel::High, "test", 100, None);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("only authorized"));
     }
@@ -678,19 +673,13 @@ mod tests {
             .unwrap();
 
         // Try to escalate immediately
-        let result =
-            ctrl.set_emergency_level("alice", EmergencyLevel::High, "Issue 2", 200, None);
+        let result = ctrl.set_emergency_level("alice", EmergencyLevel::High, "Issue 2", 200, None);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("cooldown"));
 
         // After cooldown
-        let result = ctrl.set_emergency_level(
-            "alice",
-            EmergencyLevel::High,
-            "Issue 2",
-            200 + 301,
-            None,
-        );
+        let result =
+            ctrl.set_emergency_level("alice", EmergencyLevel::High, "Issue 2", 200 + 301, None);
         assert!(result.is_ok());
     }
 
@@ -701,13 +690,7 @@ mod tests {
             .unwrap();
 
         // Can immediately de-escalate
-        let result = ctrl.set_emergency_level(
-            "alice",
-            EmergencyLevel::Low,
-            "Resolved",
-            101,
-            None,
-        );
+        let result = ctrl.set_emergency_level("alice", EmergencyLevel::Low, "Resolved", 101, None);
         assert!(result.is_ok());
     }
 
@@ -829,13 +812,7 @@ mod tests {
     fn test_duplicate_approve_fails() {
         let mut ctrl = setup();
         let id = ctrl
-            .set_emergency_level(
-                "alice",
-                EmergencyLevel::Critical,
-                "Issue",
-                100,
-                None,
-            )
+            .set_emergency_level("alice", EmergencyLevel::Critical, "Issue", 100, None)
             .unwrap();
 
         let result = ctrl.approve_emergency(id, "alice", 100);

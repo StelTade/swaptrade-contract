@@ -58,8 +58,7 @@ impl ParticipationRecord {
         score = score.saturating_add(self.proposals_created.saturating_mul(15).min(30));
 
         // Delegation activity (up to 10 points)
-        score = score
-            .saturating_add(self.delegated_votes_received.saturating_mul(5).min(10));
+        score = score.saturating_add(self.delegated_votes_received.saturating_mul(5).min(10));
 
         // Full participation bonus (10 points)
         if self.full_participation {
@@ -210,11 +209,7 @@ impl RewardManager {
     // ── Participation Tracking ───────────────────────────────────────────────
 
     /// Record a proposal creation.
-    pub fn record_proposal_created(
-        &mut self,
-        participant: &str,
-        now: u64,
-    ) -> Result<(), String> {
+    pub fn record_proposal_created(&mut self, participant: &str, now: u64) -> Result<(), String> {
         self.ensure_current_epoch(now)?;
 
         let epoch = self
@@ -263,9 +258,8 @@ impl RewardManager {
             .or_insert_with(ParticipationRecord::default);
 
         record.votes_cast = record.votes_cast.saturating_add(1);
-        record.total_voting_power_used = record
-            .total_voting_power_used
-            .saturating_add(voting_power);
+        record.total_voting_power_used =
+            record.total_voting_power_used.saturating_add(voting_power);
         if record.first_action_at == 0 {
             record.first_action_at = now;
         }
@@ -282,11 +276,7 @@ impl RewardManager {
     }
 
     /// Record delegation activity.
-    pub fn record_delegation_received(
-        &mut self,
-        delegate: &str,
-        now: u64,
-    ) -> Result<(), String> {
+    pub fn record_delegation_received(&mut self, delegate: &str, now: u64) -> Result<(), String> {
         self.ensure_current_epoch(now)?;
 
         let epoch = self
@@ -299,9 +289,7 @@ impl RewardManager {
             .entry(delegate.to_string())
             .or_insert_with(ParticipationRecord::default);
 
-        record.delegated_votes_received = record
-            .delegated_votes_received
-            .saturating_add(1);
+        record.delegated_votes_received = record.delegated_votes_received.saturating_add(1);
         if record.first_action_at == 0 {
             record.first_action_at = now;
         }
@@ -327,10 +315,7 @@ impl RewardManager {
 
     /// Finalize an epoch, computing final scores.
     pub fn finalize_epoch(&mut self, epoch_id: EpochId, now: u64) -> Result<(), String> {
-        let epoch = self
-            .epochs
-            .get_mut(&epoch_id)
-            .ok_or("epoch not found")?;
+        let epoch = self.epochs.get_mut(&epoch_id).ok_or("epoch not found")?;
 
         if epoch.finalized {
             return Err("epoch already finalized".to_string());
@@ -367,11 +352,7 @@ impl RewardManager {
     // ── Reward Calculation ───────────────────────────────────────────────────
 
     /// Calculate the reward for a participant in a given epoch.
-    pub fn calculate_reward(
-        &self,
-        participant: &str,
-        epoch_id: EpochId,
-    ) -> RewardAmount {
+    pub fn calculate_reward(&self, participant: &str, epoch_id: EpochId) -> RewardAmount {
         let epoch = match self.epochs.get(&epoch_id) {
             Some(e) => e,
             None => return 0,
@@ -391,13 +372,11 @@ impl RewardManager {
         let base_reward = (epoch.reward_pool * score as u128) / 100;
 
         // Apply participation bonuses
-        let proposal_bonus = record.proposals_created as u128
-            * self.config.proposal_creation_bonus;
+        let proposal_bonus = record.proposals_created as u128 * self.config.proposal_creation_bonus;
         let vote_bonus = record.votes_cast as u128 * self.config.vote_cast_reward;
 
         // Apply voting power multiplier
-        let power_multiplier =
-            (self.config.voting_power_multiplier_bps as u128).min(200); // Cap at 2x
+        let power_multiplier = (self.config.voting_power_multiplier_bps as u128).min(200); // Cap at 2x
         let power_bonus = (record.total_voting_power_used * power_multiplier) / 10_000;
 
         let mut total = base_reward
@@ -429,10 +408,7 @@ impl RewardManager {
         epoch_id: EpochId,
         now: u64,
     ) -> Result<RewardAmount, String> {
-        let epoch = self
-            .epochs
-            .get(&epoch_id)
-            .ok_or("epoch not found")?;
+        let epoch = self.epochs.get(&epoch_id).ok_or("epoch not found")?;
 
         if !epoch.finalized {
             return Err("epoch is not yet finalized".to_string());
@@ -451,20 +427,14 @@ impl RewardManager {
         }
 
         // Check remaining pool
-        let epoch = self
-            .epochs
-            .get_mut(&epoch_id)
-            .ok_or("epoch not found")?;
+        let epoch = self.epochs.get_mut(&epoch_id).ok_or("epoch not found")?;
         if epoch.rewards_distributed + amount > epoch.reward_pool {
             return Err("insufficient reward pool".to_string());
         }
 
         epoch.rewards_distributed = epoch.rewards_distributed.saturating_add(amount);
-        self.total_rewards_distributed = self
-            .total_rewards_distributed
-            .saturating_add(amount);
-        self.last_claim
-            .insert(participant.to_string(), now);
+        self.total_rewards_distributed = self.total_rewards_distributed.saturating_add(amount);
+        self.last_claim.insert(participant.to_string(), now);
 
         // Update all-time stats
         let stats = self
@@ -472,9 +442,7 @@ impl RewardManager {
             .entry(participant.to_string())
             .or_insert_with(AllTimeStats::default);
         stats.epochs_participated = stats.epochs_participated.saturating_add(1);
-        stats.total_rewards_claimed = stats
-            .total_rewards_claimed
-            .saturating_add(amount);
+        stats.total_rewards_claimed = stats.total_rewards_claimed.saturating_add(amount);
 
         let record = epoch.participation.get(participant);
         let score = record.map(|r| r.score()).unwrap_or(0);
@@ -509,10 +477,7 @@ impl RewardManager {
         participant: &str,
         epoch_id: EpochId,
     ) -> Option<&ParticipationRecord> {
-        self.epochs
-            .get(&epoch_id)?
-            .participation
-            .get(participant)
+        self.epochs.get(&epoch_id)?.participation.get(participant)
     }
 
     pub fn all_time_stats(&self, participant: &str) -> Option<&AllTimeStats> {
@@ -717,8 +682,7 @@ mod tests {
     fn test_delegation_recorded() {
         let mut mgr = setup();
 
-        mgr.record_delegation_received("bob_delegate", 100)
-            .unwrap();
+        mgr.record_delegation_received("bob_delegate", 100).unwrap();
         let record = mgr.participation_record("bob_delegate", 1).unwrap();
         assert_eq!(record.delegated_votes_received, 1);
     }

@@ -7,11 +7,7 @@ pub struct MultiSig {
     pub threshold: u32,
 }
 
-pub fn create_multi_sig(
-    env: &Env,
-    signers: Vec<Address>,
-    threshold: u32,
-) -> Result<MultiSig, ()> {
+pub fn create_multi_sig(env: &Env, signers: Vec<Address>, threshold: u32) -> Result<MultiSig, ()> {
     if threshold > signers.len() {
         return Err(());
     }
