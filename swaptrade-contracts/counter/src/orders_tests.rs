@@ -2,9 +2,9 @@
 
 use super::*;
 use crate::errors::ContractError;
-use soroban_sdk::{symbol_short, Env, Address};
+use crate::orders::{OrderManager, OrderStatus, OrderType};
 use soroban_sdk::testutils::Address as _;
-use crate::orders::{OrderManager, OrderType, OrderStatus};
+use soroban_sdk::{symbol_short, Address, Env};
 
 const PRECISION: u128 = 1_000_000_000_000_000_000;
 

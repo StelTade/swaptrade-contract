@@ -22,7 +22,7 @@ pub enum OrderStatus {
     Cancelled,       // Order was cancelled by user
     Expired,         // Order expired without being filled
     PartiallyFilled, // Order is partially executed
-    Scheduled,  // Recurring order is between executions, waiting for next run
+    Scheduled,       // Recurring order is between executions, waiting for next run
 }
 
 /// A trade order in the system
@@ -42,9 +42,9 @@ pub struct Order {
     pub created_at: u64,
     pub expires_at: Option<u64>, // None means no expiry
     pub filled_at: Option<u64>,
-    pub interval_secs: Option<u64>,         // For recurring: seconds between executions
+    pub interval_secs: Option<u64>, // For recurring: seconds between executions
     pub remaining_occurrences: Option<u64>, // For recurring: how many more times to execute
-    pub next_run: Option<u64>,              // For recurring: timestamp when next execution is due
+    pub next_run: Option<u64>,      // For recurring: timestamp when next execution is due
 }
 
 /// Order book for a token pair
@@ -138,7 +138,10 @@ impl OrderManager {
             return Err(ContractError::NotAdmin); // No specific "NotOrderOwner" error
         }
 
-        if order.status != OrderStatus::Pending && order.status != OrderStatus::PartiallyFilled && order.status != OrderStatus::Scheduled {
+        if order.status != OrderStatus::Pending
+            && order.status != OrderStatus::PartiallyFilled
+            && order.status != OrderStatus::Scheduled
+        {
             return Err(ContractError::InvalidAmount); // Order cannot be cancelled
         }
 
@@ -376,7 +379,11 @@ impl OrderManager {
         let next_run = current_time + interval_secs;
 
         // Generate order ID
-        let next_id: u64 = env.storage().instance().get(&symbol_short!("next_oid")).unwrap_or(1);
+        let next_id: u64 = env
+            .storage()
+            .instance()
+            .get(&symbol_short!("next_oid"))
+            .unwrap_or(1);
 
         let order = Order {
             order_id: next_id,
@@ -400,31 +407,47 @@ impl OrderManager {
         Self::save_order(env, &order);
 
         // Add to user's order list
-        let mut user_orders: Vec<u64> = env.storage()
+        let mut user_orders: Vec<u64> = env
+            .storage()
             .instance()
             .get(&Self::user_orders_key(&owner))
             .unwrap_or_else(|| Vec::new(env));
         user_orders.push_back(next_id);
-        env.storage().instance().set(&Self::user_orders_key(&owner), &user_orders);
+        env.storage()
+            .instance()
+            .set(&Self::user_orders_key(&owner), &user_orders);
 
         // Add to order book
         Self::add_to_order_book(env, token_in.clone(), token_out.clone(), next_id);
 
         // Increment next order ID
-        env.storage().instance().set(&symbol_short!("next_oid"), &(next_id + 1));
+        env.storage()
+            .instance()
+            .set(&symbol_short!("next_oid"), &(next_id + 1));
 
         // Register in global recurring orders list
-        let mut recurring_ids: Vec<u64> = env.storage()
+        let mut recurring_ids: Vec<u64> = env
+            .storage()
             .instance()
             .get(&Self::recurring_orders_key())
             .unwrap_or_else(|| Vec::new(env));
         recurring_ids.push_back(next_id);
-        env.storage().instance().set(&Self::recurring_orders_key(), &recurring_ids);
+        env.storage()
+            .instance()
+            .set(&Self::recurring_orders_key(), &recurring_ids);
 
         // Emit order placement event
         env.events().publish(
             (symbol_short!("order_new"), next_id),
-            (owner, OrderType::Recurring, token_in, token_out, amount_in, None::<u128>, None::<u128>),
+            (
+                owner,
+                OrderType::Recurring,
+                token_in,
+                token_out,
+                amount_in,
+                None::<u128>,
+                None::<u128>,
+            ),
         );
 
         Ok(next_id)
@@ -438,7 +461,8 @@ impl OrderManager {
 
         // Iterate through all orders stored by scanning user orders lists
         // We need to find recurring orders. We'll scan a global list of recurring order IDs.
-        let recurring_ids: Vec<u64> = env.storage()
+        let recurring_ids: Vec<u64> = env
+            .storage()
             .instance()
             .get(&Self::recurring_orders_key())
             .unwrap_or_else(|| Vec::new(env));
@@ -461,7 +485,9 @@ impl OrderManager {
                     }
 
                     // Only execute if status is Pending or Scheduled and next_run has arrived
-                    if order.status != OrderStatus::Pending && order.status != OrderStatus::Scheduled {
+                    if order.status != OrderStatus::Pending
+                        && order.status != OrderStatus::Scheduled
+                    {
                         continue;
                     }
 
