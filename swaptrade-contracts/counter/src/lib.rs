@@ -61,8 +61,13 @@ mod risk_management;
 #[cfg(test)]
 mod admin_controls_test;
 
+mod governance_system;
+mod governance;
+
 #[cfg(test)]
 mod governance_system_tests;
+#[cfg(test)]
+mod governance_multisig_tests;
 #[cfg(test)]
 mod proptest_fuzz;
 
