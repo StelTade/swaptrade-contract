@@ -1,6 +1,5 @@
 use soroban_sdk::{contracttype, symbol_short, Address, Env, Map, Symbol, Vec};
 
-pub const ADMIN_KEY: Symbol = symbol_short!("admin");
 pub const SIGNERS_KEY: Symbol = symbol_short!("signers");
 pub const THRESHOLD_KEY: Symbol = symbol_short!("threshold");
 pub const PROPOSALS_KEY: Symbol = symbol_short!("proposals");

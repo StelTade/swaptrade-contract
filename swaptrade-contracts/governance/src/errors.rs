@@ -30,5 +30,3 @@ pub enum GovernanceError {
     ZeroThreshold = 52,
     EmptySigners = 53,
 }
-
-pub type ContractError = GovernanceError;
