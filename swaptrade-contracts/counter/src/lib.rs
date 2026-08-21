@@ -173,7 +173,10 @@ pub use zkp_types::{
 #[cfg(feature = "experimental")]
 pub use zkp_verification::ProofVerifier;
 
-use portfolio::{Asset, CachedPortfolio, CachedTopTraders, LPPosition, Portfolio, TradeRecord};
+use portfolio::{
+    Asset, CachedPnlSummary, CachedPortfolio, CachedTopTraders, LPPosition, PnLSummary,
+    Portfolio, TradeRecord,
+};
 pub use portfolio::{Badge, Metrics, Transaction, TradeRecord as PubTradeRecord};
 pub use rate_limit::{RateLimitStatus, RateLimiter};
 pub use tiers::UserTier;
@@ -294,6 +297,7 @@ pub const CONTRACT_VERSION: u32 = 1;
 
 const PORTFOLIO_CACHE_KEY: Symbol = symbol_short!("pcache");
 const TOP_TRADERS_CACHE_KEY: Symbol = symbol_short!("tcache");
+const PNL_CACHE_KEY: Symbol = symbol_short!("pnlcache");
 const CACHE_TTL_KEY: Symbol = symbol_short!("cttl");
 const CACHE_HITS_KEY: Symbol = symbol_short!("chits");
 const CACHE_MISSES_KEY: Symbol = symbol_short!("cmiss");
@@ -358,6 +362,7 @@ fn record_cache_access(env: &Env, query: Symbol, hit: bool) {
 fn invalidate_query_cache(env: &Env) {
     env.storage().instance().remove(&PORTFOLIO_CACHE_KEY);
     env.storage().instance().remove(&TOP_TRADERS_CACHE_KEY);
+    env.storage().instance().remove(&PNL_CACHE_KEY);
 }
 
 fn apply_trader_limit(
@@ -776,6 +781,93 @@ impl CounterContract {
             .set(&PORTFOLIO_CACHE_KEY, &updated_cache);
 
         value
+    }
+
+    /// Record a trade with full PnL accounting:
+    /// debits the sold asset, credits the bought asset, releases weighted-
+    /// average cost basis on the sold leg (booking realized PnL against the
+    /// current oracle value of the received leg) and accumulates acquisition
+    /// basis (in XLM units) on the bought leg. Invalidates query caches.
+    ///
+    /// Requires prices for non-XLM legs to be published via set_price; returns
+    /// the realized PnL booked by this trade.
+    pub fn record_pnl_trade(
+        env: Env,
+        user: Address,
+        from_token: Symbol,
+        to_token: Symbol,
+        amount_in: i128,
+        amount_out: i128,
+    ) -> Result<i128, ContractError> {
+        user.require_auth();
+
+        let mut portfolio: Portfolio = env
+            .storage()
+            .instance()
+            .get(&())
+            .unwrap_or_else(|| Portfolio::new(&env));
+
+        let realized = portfolio.apply_pnl_swap(
+            &env,
+            &user,
+            &from_token,
+            &to_token,
+            amount_in,
+            amount_out,
+        )?;
+
+        portfolio.record_trade(&env, user.clone());
+        env.storage().instance().set(&(), &portfolio);
+        invalidate_query_cache(&env);
+
+        Ok(realized)
+    }
+
+    /// Get the PnL summary (realized, unrealized vs current oracle price, and
+    /// total value of held assets) for a user, with instance-storage caching
+    /// mirroring get_portfolio. Users with no trades receive a zeroed summary.
+    pub fn get_portfolio_pnl(env: Env, user: Address) -> PnLSummary {
+        let now = env.ledger().timestamp();
+        let ttl = get_cache_ttl(&env);
+
+        let pnl_cache: Map<Address, CachedPnlSummary> = env
+            .storage()
+            .instance()
+            .get(&PNL_CACHE_KEY)
+            .unwrap_or_else(|| Map::new(&env));
+
+        if let Some(entry) = pnl_cache.get(user.clone()) {
+            if now.saturating_sub(entry.cached_at) <= ttl {
+                record_cache_access(&env, symbol_short!("pnlq"), true);
+                return entry.summary;
+            }
+        }
+
+        record_cache_access(&env, symbol_short!("pnlq"), false);
+        let portfolio: Portfolio = env
+            .storage()
+            .instance()
+            .get(&())
+            .unwrap_or_else(|| Portfolio::new(&env));
+
+        let summary = portfolio.pnl_summary(&env, &user);
+        let mut updated_cache: Map<Address, CachedPnlSummary> = env
+            .storage()
+            .instance()
+            .get(&PNL_CACHE_KEY)
+            .unwrap_or_else(|| Map::new(&env));
+        updated_cache.set(
+            user,
+            CachedPnlSummary {
+                summary: summary.clone(),
+                cached_at: now,
+            },
+        );
+        env.storage()
+            .instance()
+            .set(&PNL_CACHE_KEY, &updated_cache);
+
+        summary
     }
 
     /// Get top traders with instance-storage caching.
@@ -2092,6 +2184,8 @@ impl CounterContract {
 }
 
 mod governance_tests;
+#[cfg(test)]
+mod pnl_tests;
 #[cfg(all(test, feature = "experimental"))]
 mod migration_tests;
 #[cfg(test)]
