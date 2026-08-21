@@ -236,6 +236,115 @@ fn bench_performance_targets(c: &mut Criterion) {
     group.finish();
 }
 
+// Benchmark orderbook operations
+fn bench_place_order(c: &mut Criterion) {
+    let (_env, client) = setup_benchmark_env();
+    
+    c.bench_with_input(
+        BenchmarkId::new("place_limit_order", "single"),
+        &client,
+        |b, client| {
+            b.iter(|| {
+                let maker = Address::generate(&client.env());
+                client.mint(symbol_short!("XLM"), &maker, 1000000);
+                
+                black_box(client.place_limit_order(
+                    symbol_short!("XLM"),
+                    symbol_short!("USDCSIM"),
+                    crate::swaptrade_contracts::orders::OrderSide::Sell,
+                    1000,
+                    1_000_000_000_000_000_000, // 1:1 price
+                    None,
+                    &maker
+                ))
+            })
+        },
+    );
+}
+
+fn bench_take_order(c: &mut Criterion) {
+    let (_env, client) = setup_benchmark_env();
+    let maker = Address::generate(&client.env());
+    client.mint(symbol_short!("XLM"), &maker, 1000000);
+    
+    // Pre-place an order to take
+    client.place_limit_order(
+        symbol_short!("XLM"),
+        symbol_short!("USDCSIM"),
+        crate::swaptrade_contracts::orders::OrderSide::Sell,
+        1000,
+        1_000_000_000_000_000_000,
+        None,
+        &maker
+    );
+    
+    c.bench_with_input(
+        BenchmarkId::new("take_order", "full_fill"),
+        &client,
+        |b, client| {
+            b.iter(|| {
+                let taker = Address::generate(&client.env());
+                client.mint(symbol_short!("USDCSIM"), &taker, 1000000);
+                
+                black_box(client.take_order(
+                    symbol_short!("XLM"),
+                    symbol_short!("USDCSIM"),
+                    crate::swaptrade_contracts::orders::OrderSide::Buy,
+                    1000,
+                    None,
+                    &taker
+                ))
+            })
+        },
+    );
+}
+
+fn bench_get_orderbook_snapshot(c: &mut Criterion) {
+    let (_env, client) = setup_benchmark_env();
+    
+    // Pre-populate orderbook with multiple orders
+    for _ in 0..20 {
+        let maker = Address::generate(&client.env());
+        client.mint(symbol_short!("XLM"), &maker, 1000000);
+        client.mint(symbol_short!("USDCSIM"), &maker, 1000000);
+        
+        // Place both buy and sell orders
+        client.place_limit_order(
+            symbol_short!("XLM"),
+            symbol_short!("USDCSIM"),
+            crate::swaptrade_contracts::orders::OrderSide::Sell,
+            500,
+            1_000_000_000_000_000_000,
+            None,
+            &maker
+        ).unwrap();
+        
+        client.place_limit_order(
+            symbol_short!("XLM"),
+            symbol_short!("USDCSIM"),
+            crate::swaptrade_contracts::orders::OrderSide::Buy,
+            500,
+            990_000_000_000_000_000,
+            None,
+            &maker
+        ).unwrap();
+    }
+    
+    c.bench_with_input(
+        BenchmarkId::new("get_orderbook_snapshot", "10_levels"),
+        &client,
+        |b, client| {
+            b.iter(|| {
+                black_box(client.get_orderbook_snapshot(
+                    symbol_short!("XLM"),
+                    symbol_short!("USDCSIM"),
+                    10
+                ))
+            })
+        },
+    );
+}
+
 criterion_group!(
     name = contract_benchmarks;
     config = Criterion::default().sample_size(10);
@@ -246,6 +355,9 @@ criterion_group!(
         bench_batch_operations,
         bench_sequential_swaps,
         bench_add_liquidity,
-        bench_performance_targets
+        bench_performance_targets,
+        bench_place_order,
+        bench_take_order,
+        bench_get_orderbook_snapshot
 );
 criterion_main!(contract_benchmarks);

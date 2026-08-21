@@ -1,6 +1,34 @@
 extern crate alloc;
 use soroban_sdk::{contracttype, symbol_short, Address, Env, Map, Symbol, Vec};
 
+use crate::errors::ContractError;
+
+/// Price precision used by the oracle price feed (1e18), matching trading.rs.
+const PNL_PRICE_PRECISION: u128 = 1_000_000_000_000_000_000;
+
+/// PnL summary for a user's simulated trading portfolio.
+///
+/// All values are denominated in XLM units using current oracle prices.
+#[derive(Clone, Debug, PartialEq)]
+#[contracttype]
+pub struct PnLSummary {
+    /// PnL already booked on disposals of assets that had an acquisition basis.
+    pub realized: i128,
+    /// Current market value of held assets minus their remaining cost basis.
+    pub unrealized: i128,
+    /// Current market value of all held assets that have a tracked basis.
+    pub total_value: i128,
+}
+
+/// Cache entry for the PnL summary query.
+#[derive(Clone, Debug, PartialEq)]
+#[contracttype]
+pub struct CachedPnlSummary {
+    pub summary: PnLSummary,
+    pub cached_at: u64,
+}
+
+
 #[derive(Clone, PartialEq, Debug)]
 #[contracttype]
 pub enum Asset {
@@ -72,6 +100,10 @@ pub struct Portfolio {
     winning_trades: Map<Address, u32>,                 // Count of winning trades
     losing_trades: Map<Address, u32>,                  // Count of losing trades
     total_trade_pnl: Map<Address, i128>,               // Sum of all trade PnLs
+
+    // Weighted-average cost basis tracking (PnL engine)
+    cost_basis_total: Map<(Address, Symbol), i128>, // total acquisition cost per (user, token), in XLM units
+    pnl_tokens: Map<Address, Vec<Symbol>>,          // tokens each user has acquired with a basis
 }
 
 /// Detailed trade record for analytics
@@ -175,6 +207,8 @@ impl Portfolio {
             winning_trades: Map::new(env),
             losing_trades: Map::new(env),
             total_trade_pnl: Map::new(env),
+            cost_basis_total: Map::new(env),
+            pnl_tokens: Map::new(env),
         }
     }
 
@@ -468,6 +502,178 @@ impl Portfolio {
             let losses = self.losing_trades.get(user.clone()).unwrap_or(0);
             self.losing_trades.set(user.clone(), losses.saturating_add(1));
         }
+    }
+
+    // ===== PORTFOLIO PNL ENGINE =====
+
+    /// Value `amount` units of `token` in XLM using the stored oracle price for
+    /// (token, XLM). XLM itself is the numeraire so it maps 1:1. Returns 0 when
+    /// no price is published for the pair.
+    pub(crate) fn xlm_value(env: &Env, token: &Symbol, amount: i128) -> i128 {
+        if *token == symbol_short!("XLM") {
+            return amount;
+        }
+        let price = super::oracle::get_stored_price(env, (token.clone(), symbol_short!("XLM")))
+            .map(|d| d.price)
+            .unwrap_or(0);
+        if price == 0 {
+            return 0;
+        }
+        ((amount as u128).saturating_mul(price) / PNL_PRICE_PRECISION) as i128
+    }
+
+    /// Record the acquisition side of a trade: adds `cost` (XLM units) to the
+    /// weighted-average cost basis accumulated for (user, token) and registers
+    /// the token in the user's tracked PnL universe.
+    pub fn record_acquisition(&mut self, env: &Env, user: &Address, token: &Symbol, cost: i128) {
+        let key = (user.clone(), token.clone());
+        let basis = self.cost_basis_total.get(key.clone()).unwrap_or(0);
+        if cost > 0 {
+            self.cost_basis_total.set(key, basis.saturating_add(cost));
+        }
+
+        // Register token for summary iteration (deduplicated)
+        let mut tokens: Vec<Symbol> = self
+            .pnl_tokens
+            .get(user.clone())
+            .unwrap_or_else(|| Vec::new(env));
+        if !tokens.contains(token) {
+            tokens.push_back(token.clone());
+            self.pnl_tokens.set(user.clone(), tokens);
+        }
+    }
+
+    /// Record the disposal side of a trade: releases the share of the
+    /// weighted-average cost base proportional to the disposed quantity and
+    /// books realized PnL as `proceeds - released_basis` (XLM units).
+    ///
+    /// Disposals of assets without an acquisition basis book no realized PnL.
+    pub fn record_disposal(
+        &mut self,
+        user: &Address,
+        token: &Symbol,
+        qty_before: i128,
+        qty_disposed: i128,
+        proceeds: i128,
+    ) -> i128 {
+        if qty_before <= 0 || qty_disposed <= 0 || qty_disposed > qty_before {
+            return 0;
+        }
+        let key = (user.clone(), token.clone());
+        let basis_total = self.cost_basis_total.get(key.clone()).unwrap_or(0);
+        if basis_total == 0 {
+            return 0;
+        }
+
+        // Proportional release against the pre-disposal quantity.
+        let released = (basis_total.saturating_mul(qty_disposed as u128) / qty_before as u128) as i128;
+        let released = released.min(basis_total);
+        self.cost_basis_total.set(key, basis_total.saturating_sub(released));
+
+        let realized = proceeds.saturating_sub(released);
+        let current_realized = self.realized_pnl.get(user.clone()).unwrap_or(0);
+        self.realized_pnl
+            .set(user.clone(), current_realized.saturating_add(realized));
+        realized
+    }
+
+    /// Full PnL-aware swap bookkeeping:
+    /// 1. debits `amount_in` of `from_token` from the user,
+    /// 2. credits `amount_out` of `to_token`,
+    /// 3. releases cost basis on the sold asset and books realized PnL,
+    /// 4. accumulates acquisition cost basis (in XLM) on the bought asset.
+    ///
+    /// Returns the realized PnL booked by the disposal leg (0 if none).
+    pub fn apply_pnl_swap(
+        &mut self,
+        env: &Env,
+        user: &Address,
+        from_token: &Symbol,
+        to_token: &Symbol,
+        amount_in: i128,
+        amount_out: i128,
+    ) -> Result<i128, ContractError> {
+        if *from_token == *to_token {
+            return Err(ContractError::ZeroAmountSwap);
+        }
+        if amount_in <= 0 || amount_out <= 0 {
+            return Err(ContractError::ZeroAmountSwap);
+        }
+
+        // Valuations (XLM numeraire); unknown prices are rejected so that
+        // basis accounting never silently records garbage values.
+        let in_value = Self::xlm_value(env, from_token, amount_in);
+        let out_value = Self::xlm_value(env, to_token, amount_out);
+        if in_value == 0 && *from_token != symbol_short!("XLM") {
+            return Err(ContractError::InvalidPrice);
+        }
+        if out_value == 0 && *to_token != symbol_short!("XLM") {
+            return Err(ContractError::InvalidPrice);
+        }
+
+        // Balance checks and mutations
+        let from_asset = if *from_token == symbol_short!("XLM") {
+            Asset::XLM
+        } else {
+            Asset::Custom(from_token.clone())
+        };
+        let held = self.balance_of(env, from_asset.clone(), user.clone());
+        if held < amount_in {
+            return Err(ContractError::InsufficientBalance);
+        }
+
+        // Disposal leg first (needs the pre-debit balance), then balances move.
+        let realized = self.record_disposal(user, from_token, held, amount_in, out_value);
+        self.debit(env, from_asset, user.clone(), amount_in);
+
+        // Acquisition leg
+        let to_asset = if *to_token == symbol_short!("XLM") {
+            Asset::XLM
+        } else {
+            Asset::Custom(to_token.clone())
+        };
+        self.credit(env, to_asset, user.clone(), amount_out);
+        self.record_acquisition(env, user, to_token, in_value);
+
+        Ok(realized)
+    }
+
+    /// Compute the current PnL summary for a user.
+    ///
+    /// Realized PnL comes from booked disposals; unrealized PnL compares the
+    /// current oracle value of held assets against their remaining weighted
+    /// average cost basis. Users with no tracked positions get a zeroed summary.
+    pub fn pnl_summary(&self, env: &Env, user: &Address) -> PnLSummary {
+        let realized = self.realized_pnl.get(user.clone()).unwrap_or(0);
+
+        let mut unrealized: i128 = 0;
+        let mut total_value: i128 = 0;
+
+        let tokens: Vec<Symbol> = self
+            .pnl_tokens
+            .get(user.clone())
+            .unwrap_or_else(|| Vec::new(env));
+        for token in tokens.iter() {
+            let key = (user.clone(), token.clone());
+            let basis = self.cost_basis_total.get(key.clone()).unwrap_or(0);
+            if basis == 0 {
+                continue;
+            }
+            let asset = if token == &symbol_short!("XLM") {
+                Asset::XLM
+            } else {
+                Asset::Custom(token.clone())
+            };
+            let qty = self.balances.get((user.clone(), asset)).unwrap_or(0);
+            if qty == 0 {
+                continue;
+            }
+            let value = Self::xlm_value(env, &token, qty);
+            total_value = total_value.saturating_add(value);
+            unrealized = unrealized.saturating_add(value.saturating_sub(basis));
+        }
+
+        PnLSummary { realized, unrealized, total_value }
     }
 
     /// Get comprehensive analytics summary for a user
