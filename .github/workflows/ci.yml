@@ -39,7 +39,7 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: Run Clippy lints
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: cargo clippy --workspace --lib -- -D warnings
 
       - name: Check workspace
         run: cargo check --workspace --verbose

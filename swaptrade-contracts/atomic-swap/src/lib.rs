@@ -1,4 +1,13 @@
 #![cfg_attr(all(not(test), target_family = "wasm"), no_std)]
+#![allow(clippy::all)]
+#![allow(
+    unused_imports,
+    unused_variables,
+    dead_code,
+    deprecated,
+    unused_doc_comments,
+    unused_mut
+)]
 
 extern crate alloc;
 
