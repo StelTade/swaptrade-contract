@@ -1,4 +1,4 @@
-use soroban_sdk::{symbol_short, Address, Env, Map, Symbol, Vec};
+use soroban_sdk::{contracttype, symbol_short, Address, Env, Map, Symbol, Vec};
 
 pub const ADMIN_KEY: Symbol = symbol_short!("admin");
 pub const SIGNERS_KEY: Symbol = symbol_short!("signers");
@@ -40,7 +40,7 @@ pub enum ProposalAction {
 }
 
 #[contracttype]
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive( Clone, Debug, Eq, PartialEq)]
 pub struct TimelockSchedule {
     pub proposal_id: u64,
     pub execute_at: u64,

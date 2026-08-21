@@ -1,14 +1,13 @@
-use soroban_sdk::{Address, Env, Map, Vec};
+use soroban_sdk::{Address, Env, Map, Vec, Symbol, symbol_short};
 
 use crate::errors::GovernanceError;
 use crate::storage::{
     load_proposal_count, load_proposals, load_signers, load_threshold, store_proposal_count,
-    store_proposals, store_signers, store_threshold, Proposal,
+    store_proposals, store_signers, store_threshold, Proposal, ProposalAction,
 };
 use crate::events::{
     proposal_canceled, proposal_created, proposal_executed, proposal_signed, threshold_updated,
 };
-use crate::storage::ProposalAction;
 
 pub fn propose(
     env: &Env,
@@ -51,7 +50,7 @@ pub fn propose(
     store_proposals(env, &proposals);
     store_proposal_count(env, proposal_id + 1);
 
-    let action_tag = action_symbol(&proposal.action);
+    let action_tag = action_symbol(&action);
     proposal_created(env, proposal_id, proposer, action_tag);
 
     Ok(proposal_id)
@@ -249,9 +248,9 @@ fn action_symbol(action: &ProposalAction) -> Symbol {
         ProposalAction::Pause => symbol_short!("pause"),
         ProposalAction::Unpause => symbol_short!("unpause"),
         ProposalAction::Upgrade(_) => symbol_short!("upgrade"),
-        ProposalAction::AddSigner(_) => symbol_short!("add_signer"),
-        ProposalAction::RemoveSigner(_) => symbol_short!("rm_signer"),
-        ProposalAction::SetThreshold(_) => symbol_short!("set_thresh"),
+        ProposalAction::AddSigner(_) => symbol_short!("add_sgnr"),
+        ProposalAction::RemoveSigner(_) => symbol_short!("rm_sgnr"),
+        ProposalAction::SetThreshold(_) => symbol_short!("set_thr"),
         ProposalAction::SetTimelockDelay(_) => symbol_short!("set_tl"),
     }
 }
