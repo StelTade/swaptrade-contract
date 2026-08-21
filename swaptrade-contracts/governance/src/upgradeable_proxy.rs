@@ -1,4 +1,4 @@
-use soroban_sdk::{contracttype, Address, Env, Symbol, symbol_short};
+use soroban_sdk::{Address, Env, Vec};
 
 use crate::errors::GovernanceError;
 use crate::storage::{

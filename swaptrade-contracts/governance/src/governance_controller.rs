@@ -1,4 +1,4 @@
-use soroban_sdk::{Address, Env, Map, Vec, Symbol, symbol_short};
+use soroban_sdk::{Address, Env, Vec, Symbol, symbol_short};
 
 use crate::errors::GovernanceError;
 use crate::storage::{
@@ -35,7 +35,7 @@ pub fn propose(
     let proposal = Proposal {
         id: proposal_id,
         proposer: proposer.clone(),
-        action,
+        action: action.clone(),
         signatures: Vec::new(env),
         threshold,
         created_at: env.ledger().timestamp(),
@@ -81,7 +81,7 @@ pub fn approve(
         return Err(GovernanceError::NotSigner);
     }
 
-    if proposal.signatures.iter().any(|s| s == &signer) {
+    if proposal.signatures.iter().any(|s| s == signer) {
         return Err(GovernanceError::AlreadySigned);
     }
 
@@ -113,7 +113,7 @@ pub fn revoke(
     if let Some(pos) = proposal
         .signatures
         .iter()
-        .position(|s| s == &signer)
+        .position(|s| s == signer)
     {
         proposal.signatures.remove(pos as u32);
         proposals.set(proposal_id, proposal.clone());

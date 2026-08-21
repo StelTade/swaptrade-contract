@@ -1,4 +1,4 @@
-use soroban_sdk::{Address, Env, Symbol, symbol_short};
+use soroban_sdk::{contracttype, Address, Env, Symbol, symbol_short};
 
 #[contracttype]
 #[derive(Clone)]
@@ -28,36 +28,29 @@ pub struct UpgradeEvent {
 
 pub fn proposal_created(env: &Env, proposal_id: u64, proposer: Address, action: Symbol) {
     env.events().publish(
-        (symbol_short!("prop_create"), proposal_id),
+        (Symbol::new(env, "prop_crt"), proposal_id),
         (proposer, action, env.ledger().timestamp()),
     );
 }
 
 pub fn proposal_signed(env: &Env, proposal_id: u64, signer: Address, signatures: u32) {
     env.events().publish(
-        (symbol_short!("prop_sign"), proposal_id),
+        (Symbol::new(env, "prop_sign"), proposal_id),
         (signer, signatures, env.ledger().timestamp()),
     );
 }
 
 pub fn proposal_executed(env: &Env, proposal_id: u64, executor: Address) {
     env.events().publish(
-        (symbol_short!("prop_exec"), proposal_id),
+        (Symbol::new(env, "prop_exec"), proposal_id),
         (executor, env.ledger().timestamp()),
     );
 }
 
 pub fn proposal_canceled(env: &Env, proposal_id: u64, canceler: Address) {
     env.events().publish(
-        (symbol_short!("prop_cancel"), proposal_id),
+        (Symbol::new(env, "prop_can"), proposal_id),
         (canceler, env.ledger().timestamp()),
-    );
-}
-
-pub fn timelock_scheduled(env: &Env, proposal_id: u64, delay: u64, execute_at: u64) {
-    env.events().publish(
-        (symbol_short!("tl_sched"), proposal_id),
-        (delay, execute_at, env.ledger().timestamp()),
     );
 }
 
@@ -80,17 +73,17 @@ pub fn upgraded(env: &Env, proposal_id: u64, old_impl: Address, new_impl: Addres
 
 pub fn signer_added(env: &Env, signer: Address) {
     env.events()
-        .publish((symbol_short!("signer_add"),), (signer, env.ledger().timestamp()));
+        .publish((Symbol::new(env, "signer_add"),), (signer, env.ledger().timestamp()));
 }
 
 pub fn signer_removed(env: &Env, signer: Address) {
     env.events()
-        .publish((symbol_short!("signer_rm"),), (signer, env.ledger().timestamp()));
+        .publish((Symbol::new(env, "signer_rm"),), (signer, env.ledger().timestamp()));
 }
 
 pub fn threshold_updated(env: &Env, old_threshold: u32, new_threshold: u32) {
     env.events().publish(
-        (symbol_short!("thresh_upd"),),
+        (Symbol::new(env, "thresh_upd"),),
         (old_threshold, new_threshold, env.ledger().timestamp()),
     );
 }
