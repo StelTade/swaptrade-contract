@@ -157,7 +157,7 @@ impl BalanceProofCircuit {
     ) -> Bytes {
         // Placeholder for actual balance proof generation
         // Real implementation would prove balance >= required_amount
-        Bytes::new(&soroban_sdk::Env::new())
+        Bytes::new(&Env::default())
     }
 
     /// Verify a balance sufficiency proof
@@ -199,7 +199,7 @@ impl TransactionValidityCircuit {
         _amount_blinding: &Bytes,
     ) -> ZKProof {
         ZKProof {
-            proof_data: Bytes::new(&soroban_sdk::Env::new()),
+            proof_data: Bytes::new(&Env::default()),
             scheme: ProofScheme::Bulletproof,
         }
     }
@@ -234,7 +234,7 @@ impl ZkSnarkCircuit {
     /// Generate a zk-SNARK proof
     pub fn generate_proof(_witness: &Bytes, _public_input: &Bytes) -> ZKProof {
         ZKProof {
-            proof_data: Bytes::new(&soroban_sdk::Env::new()),
+            proof_data: Bytes::new(&Env::default()),
             scheme: ProofScheme::ZkSnark,
         }
     }
@@ -256,7 +256,7 @@ impl SimplifiedProofCircuit {
     pub fn generate_simplified_proof(_value: i128, _salt: &Bytes) -> Bytes {
         // Simple proof: hash(value || salt)
         // In production: would use single attribute hash
-        Bytes::new(&soroban_sdk::Env::new())
+        Bytes::new(&Env::default())
     }
 
     /// Verify a simplified proof

@@ -6,8 +6,10 @@ pub mod position;
 pub mod position_limits;
 pub mod risk_metrics;
 pub mod volatility;
+pub mod volume_circuit_breaker;
 
 pub use circuit_breaker::*;
 pub use concentration_risk::*;
 pub use position_limits::*;
 pub use risk_metrics::*;
+pub use volume_circuit_breaker::VolumeCircuitBreakerStatus;

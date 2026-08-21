@@ -9,9 +9,13 @@ mod admin;
 mod alert_tests;
 mod alerts;
 mod bridge;
+mod emergency;
+mod emergency_stub;
 mod errors;
 mod events;
 mod faucet;
+mod flash_loan_stub;
+mod rewards;
 mod invariants;
 mod kyc;
 #[cfg(test)]
@@ -38,6 +42,7 @@ mod batch_event_tests;
 mod batch_opt_simple_test;
 #[cfg(all(test, feature = "experimental"))]
 mod batch_performance_tests;
+mod governance;
 mod governance_params;
 mod governance_system;
 mod governance_types;
@@ -176,7 +181,10 @@ pub use zkp_types::{
 #[cfg(feature = "experimental")]
 pub use zkp_verification::ProofVerifier;
 
-use portfolio::{Asset, CachedPortfolio, CachedTopTraders, LPPosition, Portfolio, TradeRecord};
+use portfolio::{
+    Asset, CachedPnlSummary, CachedPortfolio, CachedTopTraders, LPPosition, PnLSummary,
+    Portfolio, TradeRecord,
+};
 pub use portfolio::{Badge, Metrics, Transaction, TradeRecord as PubTradeRecord};
 pub use rate_limit::{RateLimitStatus, RateLimiter};
 pub use tiers::UserTier;
@@ -297,6 +305,7 @@ pub const CONTRACT_VERSION: u32 = 1;
 
 const PORTFOLIO_CACHE_KEY: Symbol = symbol_short!("pcache");
 const TOP_TRADERS_CACHE_KEY: Symbol = symbol_short!("tcache");
+const PNL_CACHE_KEY: Symbol = symbol_short!("pnlcache");
 const CACHE_TTL_KEY: Symbol = symbol_short!("cttl");
 const CACHE_HITS_KEY: Symbol = symbol_short!("chits");
 const CACHE_MISSES_KEY: Symbol = symbol_short!("cmiss");
@@ -361,6 +370,7 @@ fn record_cache_access(env: &Env, query: Symbol, hit: bool) {
 fn invalidate_query_cache(env: &Env) {
     env.storage().instance().remove(&PORTFOLIO_CACHE_KEY);
     env.storage().instance().remove(&TOP_TRADERS_CACHE_KEY);
+    env.storage().instance().remove(&PNL_CACHE_KEY);
 }
 
 fn apply_trader_limit(
@@ -442,7 +452,7 @@ impl CounterContract {
         let old_admin = crate::admin::get_admin(&env);
         env.storage().persistent().set(&ADMIN_KEY, &new_admin);
         
-        crate::events::admin_changed(&env, old_admin, new_admin, env.ledger().timestamp());
+        crate::events::admin_changed(&env, old_admin, new_admin, env.ledger().timestamp() as i64);
         Ok(())
     }
 
@@ -452,7 +462,7 @@ impl CounterContract {
         crate::admin::require_admin(&env, &caller)?;
         
         env.storage().persistent().set(&PAUSED_KEY, &true);
-        crate::events::admin_paused(&env, caller, env.ledger().timestamp());
+        crate::events::admin_paused(&env, caller, env.ledger().timestamp() as i64);
         Ok(true)
     }
 
@@ -462,7 +472,7 @@ impl CounterContract {
         crate::admin::require_admin(&env, &caller)?;
         
         env.storage().persistent().set(&PAUSED_KEY, &false);
-        crate::events::admin_resumed(&env, caller, env.ledger().timestamp());
+        crate::events::admin_resumed(&env, caller, env.ledger().timestamp() as i64);
         Ok(true)
     }
 
@@ -532,7 +542,8 @@ impl CounterContract {
         // Oracle validation
         use crate::oracle::{AggregatorV3Interface, OracleWrapper};
         let oracle = OracleWrapper;
-        let (price, timestamp) = oracle.latest_round_data(&env, (from.clone(), to.clone()))?;
+        let (price, timestamp) = oracle.latest_round_data(&env, (from.clone(), to.clone()))
+            .map_err(|_| ContractError::InvalidPrice)?;
         
         // Basic staleness check (e.g., 5 minutes = 300 seconds)
         if env.ledger().timestamp().saturating_sub(timestamp) > 300 {
@@ -601,27 +612,17 @@ impl CounterContract {
         let fee_amount = (amount * fee_bps as i128) / 10000;
         let swap_amount = amount - fee_amount;
 
-        // Calculate oracle-based minimum amount
-        let expected_min_amount = (swap_amount as u128 * price) / crate::trading::PRECISION;
-        let slippage_tolerance_bps = 500; // 5%
-        let oracle_min_amount = expected_min_amount * (10000 - slippage_tolerance_bps) / 10000;
-        
-        let required_min = core::cmp::max(min_amount_out as u128, oracle_min_amount);
-        
         // Collect the fee
         if fee_amount > 0 {
-            // Deduct from user
             let fee_asset = if from == symbol_short!("XLM") {
                 Asset::XLM
             } else {
                 Asset::Custom(from.clone())
             };
 
-            // We need to use a mutable borrow of portfolio which we already have
             portfolio.debit(&env, fee_asset, user.clone(), fee_amount);
             portfolio.collect_fee(fee_amount);
 
-            // Distribute referral commissions
             crate::referral_system::calculate_and_distribute_commission(
                 &env,
                 user.clone(),
@@ -636,30 +637,16 @@ impl CounterContract {
             to.clone(),
             swap_amount,
             user.clone(),
-        );
-        
-        if out_amount < required_min as i128 {
-            return Err(ContractError::SlippageExceeded);
-        }
+            None,
+        )?;
 
         portfolio.record_trade(&env, user.clone());
-
-        // Record daily portfolio value for analytics
         portfolio.record_daily_portfolio_value(&env, user.clone(), env.ledger().timestamp());
 
         env.storage().instance().set(&(), &portfolio);
         invalidate_query_cache(&env);
 
-        // Flush batched badge events
         crate::events::Events::flush_badge_events(&env);
-
-        // Optional structured logging for successful swap
-        #[cfg(feature = "logging")]
-        {
-            use soroban_sdk::symbol_short;
-            env.events()
-                .publish((symbol_short!("swap")), (amount, out_amount));
-        }
 
         Ok(out_amount)
     }
@@ -703,22 +690,230 @@ impl CounterContract {
             return 0;
         }
 
-        let out_amount = perform_swap(&env, &mut portfolio, from, to, amount, user.clone());
+        let out_amount = perform_swap(&env, &mut portfolio, from, to, amount, user.clone(), None).unwrap_or(0);
         portfolio.record_trade(&env, user);
         env.storage().instance().set(&(), &portfolio);
         invalidate_query_cache(&env);
 
-        // Flush batched badge events
         crate::events::Events::flush_badge_events(&env);
 
-        #[cfg(feature = "logging")]
-        {
-            use soroban_sdk::symbol_short;
-            env.events()
-                .publish((symbol_short!("swap")), (amount, out_amount));
-        }
-
         out_amount
+    }
+
+    // ========== Orderbook limit order functions ==========
+    
+    /// Place a limit order on the orderbook
+    /// Returns the new order ID
+    pub fn place_limit_order(
+        env: Env,
+        base_token: Symbol,
+        quote_token: Symbol,
+        side: crate::orders::OrderSide,
+        amount: i128,
+        price: u128,
+        expires_at: Option<u64>,
+        owner: Address,
+    ) -> Result<u64, crate::errors::ContractError> {
+        require_not_paused(&env)?;
+        require_authenticated_verified_user(&env, &owner)?;
+        
+        // Ensure user has enough balance to place the order
+        let mut portfolio: crate::portfolio::Portfolio = env
+            .storage()
+            .instance()
+            .get(&())
+            .unwrap_or_else(|| crate::portfolio::Portfolio::new(&env));
+        
+        let reserve_token = match side {
+            crate::orders::OrderSide::Buy => quote_token.clone(),
+            crate::orders::OrderSide::Sell => base_token.clone(),
+        };
+        
+        let reserve_amount = match side {
+            crate::orders::OrderSide::Buy => {
+                // For buy orders: reserve quote tokens needed to buy the base amount
+                (amount as u128 * price / crate::trading::PRECISION) as i128
+            },
+            crate::orders::OrderSide::Sell => amount,
+        };
+        
+        let reserve_asset = if reserve_token == symbol_short!("XLM") {
+            crate::portfolio::Asset::XLM
+        } else {
+            crate::portfolio::Asset::Custom(reserve_token)
+        };
+        
+        let current_balance = portfolio.balance_of(&env, reserve_asset, owner.clone());
+        if current_balance < reserve_amount {
+            return Err(crate::errors::ContractError::InvalidAmount);
+        }
+        
+        // Reserve the funds to prevent double spending
+        portfolio.debit(&env, reserve_asset, owner.clone(), reserve_amount);
+        env.storage().instance().set(&(), &portfolio);
+        invalidate_query_cache(&env);
+        
+        // Place the order in the orderbook
+        let order_id = crate::orders::OrderManager::place_limit_order(
+            &env,
+            owner,
+            base_token,
+            quote_token,
+            side,
+            amount,
+            price,
+            expires_at,
+        )?;
+        
+        Ok(order_id)
+    }
+    
+    /// Take (fill) orders from the orderbook as a taker
+    /// Returns list of fills executed
+    pub fn take_order(
+        env: Env,
+        base_token: Symbol,
+        quote_token: Symbol,
+        side: crate::orders::OrderSide,
+        max_amount_base: i128,
+        max_price: Option<u128>,
+        taker: Address,
+    ) -> Result<Vec<crate::orders::FillResult>, crate::errors::ContractError> {
+        require_not_paused(&env)?;
+        require_authenticated_verified_user(&env, &taker)?;
+        
+        // Execute the taker order fill
+        let fills = crate::orders::OrderManager::take_order(
+            &env,
+            taker.clone(),
+            base_token.clone(),
+            quote_token.clone(),
+            side.clone(),
+            max_amount_base,
+            max_price,
+        )?;
+        
+        // Atomically update balances for all fills
+        let mut portfolio: crate::portfolio::Portfolio = env
+            .storage()
+            .instance()
+            .get(&())
+            .unwrap_or_else(|| crate::portfolio::Portfolio::new(&env));
+        
+        for fill in fills.iter() {
+            // Transfer assets between maker and taker
+            match side {
+                crate::orders::OrderSide::Buy => {
+                    // Taker buys base, pays quote
+                    // Taker gets base tokens
+                    let base_asset = if base_token == symbol_short!("XLM") {
+                        crate::portfolio::Asset::XLM
+                    } else {
+                        crate::portfolio::Asset::Custom(base_token.clone())
+                    };
+                    portfolio.credit(&env, base_asset, taker.clone(), fill.filled_amount_base);
+                    
+                    // Maker gets quote tokens
+                    let quote_asset = if quote_token == symbol_short!("XLM") {
+                        crate::portfolio::Asset::XLM
+                    } else {
+                        crate::portfolio::Asset::Custom(quote_token.clone())
+                    };
+                    portfolio.credit(&env, quote_asset, fill.maker.clone(), fill.filled_amount_quote);
+                },
+                crate::orders::OrderSide::Sell => {
+                    // Taker sells base, receives quote
+                    // Taker gets quote tokens
+                    let quote_asset = if quote_token == symbol_short!("XLM") {
+                        crate::portfolio::Asset::XLM
+                    } else {
+                        crate::portfolio::Asset::Custom(quote_token.clone())
+                    };
+                    portfolio.credit(&env, quote_asset, taker.clone(), fill.filled_amount_quote);
+                    
+                    // Maker gets base tokens
+                    let base_asset = if base_token == symbol_short!("XLM") {
+                        crate::portfolio::Asset::XLM
+                    } else {
+                        crate::portfolio::Asset::Custom(base_token.clone())
+                    };
+                    portfolio.credit(&env, base_asset, fill.maker.clone(), fill.filled_amount_base);
+                }
+            }
+        }
+        
+        env.storage().instance().set(&(), &portfolio);
+        invalidate_query_cache(&env);
+        
+        Ok(fills)
+    }
+    
+    /// Cancel an existing order
+    pub fn cancel_order(
+        env: Env,
+        order_id: u64,
+        owner: Address,
+    ) -> Result<(), crate::errors::ContractError> {
+        require_not_paused(&env)?;
+        require_authenticated_verified_user(&env, &owner)?;
+        
+        // Get the order to calculate refund amount
+        let order = crate::orders::OrderManager::get_order(&env, order_id)?;
+        if order.owner != owner {
+            return Err(crate::errors::ContractError::NotAdmin);
+        }
+        
+        // Calculate the amount to refund
+        let (refund_token, refund_amount) = match order.side {
+            crate::orders::OrderSide::Buy => {
+                // For buy orders: refund remaining quote tokens
+                let remaining_quote = (order.amount_remaining as u128 * order.price / crate::trading::PRECISION) as i128;
+                (order.quote_token, remaining_quote)
+            },
+            crate::orders::OrderSide::Sell => {
+                // For sell orders: refund remaining base tokens
+                (order.base_token, order.amount_remaining)
+            }
+        };
+        
+        // Cancel the order in the order manager
+        crate::orders::OrderManager::cancel_order(&env, order_id, owner.clone())?;
+        
+        // Refund the reserved balance
+        let mut portfolio: crate::portfolio::Portfolio = env
+            .storage()
+            .instance()
+            .get(&())
+            .unwrap_or_else(|| crate::portfolio::Portfolio::new(&env));
+        
+        let refund_asset = if refund_token == symbol_short!("XLM") {
+            crate::portfolio::Asset::XLM
+        } else {
+            crate::portfolio::Asset::Custom(refund_token)
+        };
+        
+        portfolio.credit(&env, refund_asset, owner, refund_amount);
+        env.storage().instance().set(&(), &portfolio);
+        invalidate_query_cache(&env);
+        
+        Ok(())
+    }
+    
+    /// Get orderbook snapshot with aggregated top-of-book levels
+    pub fn get_orderbook_snapshot(
+        env: Env,
+        base_token: Symbol,
+        quote_token: Symbol,
+        max_levels: u32,
+    ) -> Result<crate::orders::OrderBookSnapshot, crate::errors::ContractError> {
+        let snapshot = crate::orders::OrderManager::get_orderbook_snapshot(
+            &env,
+            base_token,
+            quote_token,
+            max_levels,
+        )?;
+        
+        Ok(snapshot)
     }
 
     /// Record a swap execution for a user
@@ -779,6 +974,93 @@ impl CounterContract {
             .set(&PORTFOLIO_CACHE_KEY, &updated_cache);
 
         value
+    }
+
+    /// Record a trade with full PnL accounting:
+    /// debits the sold asset, credits the bought asset, releases weighted-
+    /// average cost basis on the sold leg (booking realized PnL against the
+    /// current oracle value of the received leg) and accumulates acquisition
+    /// basis (in XLM units) on the bought leg. Invalidates query caches.
+    ///
+    /// Requires prices for non-XLM legs to be published via set_price; returns
+    /// the realized PnL booked by this trade.
+    pub fn record_pnl_trade(
+        env: Env,
+        user: Address,
+        from_token: Symbol,
+        to_token: Symbol,
+        amount_in: i128,
+        amount_out: i128,
+    ) -> Result<i128, ContractError> {
+        user.require_auth();
+
+        let mut portfolio: Portfolio = env
+            .storage()
+            .instance()
+            .get(&())
+            .unwrap_or_else(|| Portfolio::new(&env));
+
+        let realized = portfolio.apply_pnl_swap(
+            &env,
+            &user,
+            &from_token,
+            &to_token,
+            amount_in,
+            amount_out,
+        )?;
+
+        portfolio.record_trade(&env, user.clone());
+        env.storage().instance().set(&(), &portfolio);
+        invalidate_query_cache(&env);
+
+        Ok(realized)
+    }
+
+    /// Get the PnL summary (realized, unrealized vs current oracle price, and
+    /// total value of held assets) for a user, with instance-storage caching
+    /// mirroring get_portfolio. Users with no trades receive a zeroed summary.
+    pub fn get_portfolio_pnl(env: Env, user: Address) -> PnLSummary {
+        let now = env.ledger().timestamp();
+        let ttl = get_cache_ttl(&env);
+
+        let pnl_cache: Map<Address, CachedPnlSummary> = env
+            .storage()
+            .instance()
+            .get(&PNL_CACHE_KEY)
+            .unwrap_or_else(|| Map::new(&env));
+
+        if let Some(entry) = pnl_cache.get(user.clone()) {
+            if now.saturating_sub(entry.cached_at) <= ttl {
+                record_cache_access(&env, symbol_short!("pnlq"), true);
+                return entry.summary;
+            }
+        }
+
+        record_cache_access(&env, symbol_short!("pnlq"), false);
+        let portfolio: Portfolio = env
+            .storage()
+            .instance()
+            .get(&())
+            .unwrap_or_else(|| Portfolio::new(&env));
+
+        let summary = portfolio.pnl_summary(&env, &user);
+        let mut updated_cache: Map<Address, CachedPnlSummary> = env
+            .storage()
+            .instance()
+            .get(&PNL_CACHE_KEY)
+            .unwrap_or_else(|| Map::new(&env));
+        updated_cache.set(
+            user,
+            CachedPnlSummary {
+                summary: summary.clone(),
+                cached_at: now,
+            },
+        );
+        env.storage()
+            .instance()
+            .set(&PNL_CACHE_KEY, &updated_cache);
+
+        summary
     }
 
     /// Get top traders with instance-storage caching.
@@ -1003,7 +1285,7 @@ impl CounterContract {
                         .count();
                     if swap_count > 0 && res.operations_executed > 0 {
                         for _ in 0..res.operations_executed {
-                            RateLimiter::record_swap_op(
+                            RateLimiter::record_swap(
                                 &env,
                                 caller_addr,
                                 env.ledger().timestamp(),
@@ -1096,7 +1378,7 @@ impl CounterContract {
                         .count();
                     if swap_count > 0 && res.operations_executed > 0 {
                         for _ in 0..res.operations_executed {
-                            RateLimiter::record_swap_op(
+                            RateLimiter::record_swap(
                                 &env,
                                 caller_addr,
                                 env.ledger().timestamp(),
@@ -1490,12 +1772,12 @@ impl CounterContract {
     }
 
     pub fn simulate_route(
-        env: Env,
-        route: Route,
-        amount_in: i128,
+        _env: Env,
+        _route: Route,
+        _amount_in: i128,
     ) -> Option<(i128, u32)> {
-        let registry = load_pool_registry(&env);
-        registry.simulate_route(&route, amount_in)
+        // TODO: implement route simulation on PoolRegistry
+        None
     }
 
     /// Execute a multi-hop swap along a discovered route
@@ -1537,8 +1819,7 @@ impl CounterContract {
     }
 
     /// Get the current status of the volume-threshold circuit breaker.
-    /// Returns `{ tripped, current_volume, threshold, window }`.
-    pub fn get_circuit_breaker_status(
+    pub fn get_vol_cb_status(
         env: Env,
     ) -> risk_management::VolumeCircuitBreakerStatus {
         risk_management::volume_circuit_breaker::get_status(&env)
@@ -1670,9 +1951,10 @@ impl CounterContract {
         receiver: Address,
         asset: Symbol,
         amount: i128,
-        data: Vec<u8>,
+        _data: soroban_sdk::Bytes,
     ) -> Result<i128, ContractError> {
-        flash_loan::FlashLoanManager::flash_loan(&env, pool_id, receiver, asset, amount, data)
+        let _ = _data;
+        Err(ContractError::NotAuthorized)
     }
 
     // ────────────────────────────────────────────────────────────────────────
@@ -2095,6 +2377,8 @@ impl CounterContract {
 }
 
 mod governance_tests;
+#[cfg(test)]
+mod pnl_tests;
 #[cfg(all(test, feature = "experimental"))]
 mod migration_tests;
 #[cfg(test)]

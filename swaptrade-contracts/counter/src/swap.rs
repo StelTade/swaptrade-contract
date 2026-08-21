@@ -70,7 +70,7 @@ pub fn perform_private_swap(
     // Initialize the ZKP verifier and processor with default circuit parameters
     let params = CircuitParameters::default();
     let verifier = ProofVerifier::new(params);
-    let processor = PrivateTransactionProcessor::new(verifier);
+    let processor = PrivateTransactionProcessor::new();
     
     // Execute the private swap using the implementation from private_transaction module
     private_swap_exec(env, &processor, user, from, to, private_tx)

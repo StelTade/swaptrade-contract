@@ -288,3 +288,224 @@ fn test_match_pending_orders() {
     let order = OrderManager::get_order(&env, order_id).unwrap();
     assert_eq!(order.status, OrderStatus::Filled);
 }
+
+#[test]
+fn test_new_place_limit_order() {
+    let env = Env::default();
+    let maker = Address::generate(&env);
+    let xlm = symbol_short!("XLM");
+    let usdc = symbol_short!("USDC");
+
+    // Place limit sell order (sell XLM for USDC at 1.0 USDC/XLM)
+    let order_id = OrderManager::place_limit_order(
+        &env,
+        maker.clone(),
+        xlm.clone(),
+        usdc.clone(),
+        OrderSide::Sell,
+        1000, // 1000 XLM
+        PRECISION, // 1 USDC per XLM
+        None,
+    ).unwrap();
+
+    assert_eq!(order_id, 1);
+
+    // Verify order was created correctly
+    let order = OrderManager::get_order(&env, order_id).unwrap();
+    assert_eq!(order.order_id, 1);
+    assert_eq!(order.owner, maker);
+    assert_eq!(order.side, OrderSide::Sell);
+    assert_eq!(order.base_token, xlm);
+    assert_eq!(order.quote_token, usdc);
+    assert_eq!(order.amount, 1000);
+    assert_eq!(order.amount_remaining, 1000);
+    assert_eq!(order.price, PRECISION);
+    assert_eq!(order.status, OrderStatus::Pending);
+}
+
+#[test]
+fn test_take_order_full_fill() {
+    let env = Env::default();
+    let maker = Address::generate(&env);
+    let taker = Address::generate(&env);
+    let xlm = symbol_short!("XLM");
+    let usdc = symbol_short!("USDC");
+
+    // Maker places a limit sell order: sell 1000 XLM at 1.0 USDC/XLM
+    let order_id = OrderManager::place_limit_order(
+        &env,
+        maker.clone(),
+        xlm.clone(),
+        usdc.clone(),
+        OrderSide::Sell,
+        1000,
+        PRECISION,
+        None,
+    ).unwrap();
+
+    // Taker places a buy order for 1000 XLM, accepts any price
+    let fills = OrderManager::take_order(
+        &env,
+        taker.clone(),
+        xlm.clone(),
+        usdc.clone(),
+        OrderSide::Buy,
+        1000,
+        None,
+    ).unwrap();
+
+    // Verify single full fill
+    assert_eq!(fills.len(), 1);
+    let fill = fills.get(0).unwrap();
+    assert_eq!(fill.order_id, order_id);
+    assert_eq!(fill.filled_amount_base, 1000);
+    assert_eq!(fill.filled_amount_quote, 1000); // 1000 XLM * 1 USDC/XLM = 1000 USDC
+    assert_eq!(fill.is_complete_fill, true);
+    assert_eq!(fill.maker, maker);
+    assert_eq!(fill.taker, taker);
+
+    // Verify order is now filled
+    let order = OrderManager::get_order(&env, order_id).unwrap();
+    assert_eq!(order.status, OrderStatus::Filled);
+    assert_eq!(order.amount_remaining, 0);
+    assert_eq!(order.amount_filled, 1000);
+}
+
+#[test]
+fn test_take_order_partial_fill() {
+    let env = Env::default();
+    let maker = Address::generate(&env);
+    let taker = Address::generate(&env);
+    let xlm = symbol_short!("XLM");
+    let usdc = symbol_short!("USDC");
+
+    // Maker places a limit sell order: sell 1000 XLM at 1.0 USDC/XLM
+    let order_id = OrderManager::place_limit_order(
+        &env,
+        maker.clone(),
+        xlm.clone(),
+        usdc.clone(),
+        OrderSide::Sell,
+        1000,
+        PRECISION,
+        None,
+    ).unwrap();
+
+    // Taker only buys 400 XLM (partial fill)
+    let fills = OrderManager::take_order(
+        &env,
+        taker.clone(),
+        xlm.clone(),
+        usdc.clone(),
+        OrderSide::Buy,
+        400,
+        None,
+    ).unwrap();
+
+    // Verify partial fill
+    assert_eq!(fills.len(), 1);
+    let fill = fills.get(0).unwrap();
+    assert_eq!(fill.filled_amount_base, 400);
+    assert_eq!(fill.is_complete_fill, false);
+
+    // Verify order is partially filled
+    let order = OrderManager::get_order(&env, order_id).unwrap();
+    assert_eq!(order.status, OrderStatus::PartiallyFilled);
+    assert_eq!(order.amount_remaining, 600);
+    assert_eq!(order.amount_filled, 400);
+}
+
+#[test]
+fn test_time_price_priority() {
+    let env = Env::default();
+    let maker1 = Address::generate(&env);
+    let maker2 = Address::generate(&env);
+    let maker3 = Address::generate(&env);
+    let taker = Address::generate(&env);
+    let xlm = symbol_short!("XLM");
+    let usdc = symbol_short!("USDC");
+
+    // Place multiple sell orders with different prices
+    // Maker1: sell at 1.1 USDC/XLM
+    OrderManager::place_limit_order(
+        &env, maker1.clone(), xlm.clone(), usdc.clone(), OrderSide::Sell, 500, (PRECISION*11/10), None
+    ).unwrap();
+    
+    // Maker2: sell at 1.0 USDC/XLM (better price for taker)
+    OrderManager::place_limit_order(
+        &env, maker2.clone(), xlm.clone(), usdc.clone(), OrderSide::Sell, 500, PRECISION, None
+    ).unwrap();
+    
+    // Maker3: sell at 0.9 USDC/XLM (best price)
+    let order_id3 = OrderManager::place_limit_order(
+        &env, maker3.clone(), xlm.clone(), usdc.clone(), OrderSide::Sell, 500, (PRECISION*9/10), None
+    ).unwrap();
+
+    // Taker buys 400 XLM - should fill the lowest price first (maker3's order)
+    let fills = OrderManager::take_order(
+        &env, taker.clone(), xlm.clone(), usdc.clone(), OrderSide::Buy, 400, None
+    ).unwrap();
+
+    assert_eq!(fills.len(), 1);
+    assert_eq!(fills.get(0).unwrap().order_id, order_id3);
+    assert_eq!(fills.get(0).unwrap().price, (PRECISION*9/10));
+}
+
+#[test]
+fn test_orderbook_snapshot() {
+    let env = Env::default();
+    let maker1 = Address::generate(&env);
+    let maker2 = Address::generate(&env);
+    let xlm = symbol_short!("XLM");
+    let usdc = symbol_short!("USDC");
+
+    // Place bid orders (buy XLM)
+    OrderManager::place_limit_order(
+        &env, maker1.clone(), xlm.clone(), usdc.clone(), OrderSide::Buy, 1000, PRECISION, None
+    ).unwrap();
+    
+    // Place another bid at same price
+    OrderManager::place_limit_order(
+        &env, maker2.clone(), xlm.clone(), usdc.clone(), OrderSide::Buy, 2000, PRECISION, None
+    ).unwrap();
+
+    // Get orderbook snapshot
+    let snapshot = OrderManager::get_orderbook_snapshot(
+        &env, xlm.clone(), usdc.clone(), 10
+    ).unwrap();
+
+    // Verify snapshot contains aggregated bids
+    assert_eq!(snapshot.bids.len(), 1);
+    let bid_level = snapshot.bids.get(0).unwrap();
+    assert_eq!(bid_level.price, PRECISION);
+    assert_eq!(bid_level.total_amount, 3000); // 1000 + 2000
+    assert_eq!(bid_level.order_count, 2);
+}
+
+#[test]
+fn test_cancel_order_frees_balance() {
+    let env = Env::default();
+    let maker = Address::generate(&env);
+    let xlm = symbol_short!("XLM");
+    let usdc = symbol_short!("USDC");
+
+    // Place order
+    let order_id = OrderManager::place_limit_order(
+        &env, maker.clone(), xlm.clone(), usdc.clone(), OrderSide::Sell, 1000, PRECISION, None
+    ).unwrap();
+
+    // Cancel order
+    OrderManager::cancel_order(&env, order_id, maker.clone()).unwrap();
+
+    // Verify order is cancelled
+    let order = OrderManager::get_order(&env, order_id).unwrap();
+    assert_eq!(order.status, OrderStatus::Cancelled);
+    
+    // Verify it's not in the orderbook anymore (won't be filled in future takes)
+    let taker = Address::generate(&env);
+    let fills = OrderManager::take_order(
+        &env, taker.clone(), xlm.clone(), usdc.clone(), OrderSide::Buy, 1000, None
+    ).unwrap();
+    
+    assert_eq!(fills.len(), 0); // No orders left to fill
+}

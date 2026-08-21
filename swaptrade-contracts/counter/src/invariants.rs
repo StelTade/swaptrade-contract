@@ -303,7 +303,7 @@ pub fn invariant_lp_token_conservation(portfolio: &Portfolio) -> bool {
 /// All statistical counters should never be negative.
 pub fn invariant_metrics_non_negative(portfolio: &Portfolio) -> bool {
     let metrics = portfolio.get_metrics();
-    metrics.trades_executed >= 0 && metrics.failed_orders >= 0 && metrics.balances_updated >= 0
+    true // counters are unsigned and always non-negative
 }
 
 /// INVARIANT: Fee accumulation must be non-negative

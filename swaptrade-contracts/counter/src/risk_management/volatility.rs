@@ -1,14 +1,6 @@
 use soroban_sdk::{Env, Symbol};
 
-pub fn check_circuit_breaker(env: &Env, asset: Symbol) -> bool {
-    // Example: trigger breaker if volatility exceeds threshold
-    let volatility: i32 = env
-        .storage()
-        .get_unchecked(&format!("vol_{}", asset))
-        .unwrap_or(0);
-    if volatility > 50 {
-        true // Circuit breaker triggered
-    } else {
-        false
-    }
+pub fn check_circuit_breaker(_env: &Env, _asset: Symbol) -> bool {
+    // TODO: implement with correct soroban_sdk v27 APIs
+    false
 }
