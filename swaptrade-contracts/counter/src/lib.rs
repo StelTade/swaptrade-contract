@@ -38,6 +38,7 @@ mod batch_event_tests;
 mod batch_opt_simple_test;
 #[cfg(all(test, feature = "experimental"))]
 mod batch_performance_tests;
+mod governance;
 mod governance_params;
 mod governance_system;
 mod governance_types;
@@ -55,8 +56,6 @@ mod risk_management;
 
 #[cfg(test)]
 mod admin_controls_test;
-
-mod governance_system;
 
 #[cfg(test)]
 mod governance_system_tests;
