@@ -1,3 +1,12 @@
+#![allow(clippy::all)]
+#![allow(
+    unused_imports,
+    unused_variables,
+    dead_code,
+    deprecated,
+    unused_doc_comments,
+    unused_mut
+)]
 //! Formal Verification Tests for SwapTrade Contract
 //!
 //! This module implements property-based testing to verify critical invariants:

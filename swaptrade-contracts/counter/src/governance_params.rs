@@ -192,10 +192,9 @@ impl GovernanceParams {
     ) -> Result<(), SwapTradeError> {
         // The caller (main governance contract) is responsible for authorization.
         Self::validate_param_value(&param, new_value)?;
-        env.storage().persistent().set(
-            &GovParamStorageKey::ParamValue(param.clone()),
-            &new_value,
-        );
+        env.storage()
+            .persistent()
+            .set(&GovParamStorageKey::ParamValue(param.clone()), &new_value);
         env.events().publish(
             (symbol_short!("gov"), symbol_short!("applied")),
             (param, new_value),

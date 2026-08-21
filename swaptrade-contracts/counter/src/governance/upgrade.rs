@@ -49,8 +49,6 @@ impl Version {
     pub fn is_patch(&self, other: &Version) -> bool {
         self.major == other.major && self.minor == other.minor && self.patch > other.patch
     }
-
-
 }
 
 impl std::fmt::Display for Version {
@@ -182,12 +180,12 @@ pub struct UpgradeConfig {
 impl Default for UpgradeConfig {
     fn default() -> Self {
         Self {
-            default_timelock_secs: 172800,  // 48 hours
-            hotfix_timelock_secs: 3600,     // 1 hour
-            major_required_approvals: 5,    // 5 signers for major
-            minor_required_approvals: 3,    // 3 signers for minor
-            patch_required_approvals: 2,    // 2 signers for patch
-            max_proposal_lifetime: 604800,  // 7 days
+            default_timelock_secs: 172800, // 48 hours
+            hotfix_timelock_secs: 3600,    // 1 hour
+            major_required_approvals: 5,   // 5 signers for major
+            minor_required_approvals: 3,   // 3 signers for minor
+            patch_required_approvals: 2,   // 2 signers for patch
+            max_proposal_lifetime: 604800, // 7 days
             rollback_enabled: true,
         }
     }
@@ -213,11 +211,7 @@ pub struct UpgradeManager {
 }
 
 impl UpgradeManager {
-    pub fn new(
-        current_version: Version,
-        signers: Vec<String>,
-        config: UpgradeConfig,
-    ) -> Self {
+    pub fn new(current_version: Version, signers: Vec<String>, config: UpgradeConfig) -> Self {
         Self {
             current_version,
             proposals: HashMap::new(),
@@ -877,16 +871,11 @@ mod tests {
                 300 + 172800,
             )
             .unwrap();
-        mgr.approve_upgrade(id2, "bob", 400 + 172800)
-            .unwrap();
-        mgr.approve_upgrade(id2, "carol", 400 + 172800)
-            .unwrap();
-        mgr.approve_upgrade(id2, "dave", 400 + 172800)
-            .unwrap();
-        mgr.approve_upgrade(id2, "eve", 400 + 172800)
-            .unwrap();
-        mgr.execute_upgrade(id2, 400 + 172800 + 172800)
-            .unwrap();
+        mgr.approve_upgrade(id2, "bob", 400 + 172800).unwrap();
+        mgr.approve_upgrade(id2, "carol", 400 + 172800).unwrap();
+        mgr.approve_upgrade(id2, "dave", 400 + 172800).unwrap();
+        mgr.approve_upgrade(id2, "eve", 400 + 172800).unwrap();
+        mgr.execute_upgrade(id2, 400 + 172800 + 172800).unwrap();
 
         assert_eq!(mgr.current_version(), &Version::new(2, 0, 0));
         assert_eq!(mgr.history().len(), 2);
@@ -894,11 +883,7 @@ mod tests {
 
     #[test]
     fn test_proposal_expiry() {
-        let signers = vec![
-            "alice".to_string(),
-            "bob".to_string(),
-            "carol".to_string(),
-        ];
+        let signers = vec!["alice".to_string(), "bob".to_string(), "carol".to_string()];
         let config = UpgradeConfig {
             max_proposal_lifetime: 3600, // 1 hour
             ..UpgradeConfig::default()

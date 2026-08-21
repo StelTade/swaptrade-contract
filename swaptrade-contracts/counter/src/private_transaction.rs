@@ -4,8 +4,8 @@
 // soroban_sdk v27. Stubs below allow the crate to compile.
 
 use crate::zkp_types::{
-    AuditEventType, AuditLogEntry, CircuitParameters, PrivateTransaction,
-    ProofVerificationResult, RangeProof, TransactionWitness, ZKProof,
+    AuditEventType, AuditLogEntry, CircuitParameters, PrivateTransaction, ProofVerificationResult,
+    RangeProof, TransactionWitness, ZKProof,
 };
 use soroban_sdk::{symbol_short, Address, Bytes, Env, Symbol};
 
@@ -18,7 +18,11 @@ pub struct PrivateTransactionBuilder {
 
 impl PrivateTransactionBuilder {
     pub fn new(env: Env, sender: Address, receiver: Address) -> Self {
-        Self { sender, receiver, env }
+        Self {
+            sender,
+            receiver,
+            env,
+        }
     }
 
     pub fn build(
@@ -50,9 +54,13 @@ impl PrivateTransactionBuilder {
 pub struct PrivateTransactionProcessor;
 
 impl PrivateTransactionProcessor {
-    pub fn new() -> Self { Self }
+    pub fn new() -> Self {
+        Self
+    }
 
-    pub fn validate_transaction(&self, _tx: &PrivateTransaction) -> bool { true }
+    pub fn validate_transaction(&self, _tx: &PrivateTransaction) -> bool {
+        true
+    }
 
     pub fn process_private_swap(
         &self,
@@ -126,7 +134,9 @@ impl AuditTrailManager {
         soroban_sdk::Vec::new(_env)
     }
 
-    pub fn verify_compliance(_env: &Env, _tx_id: &Bytes) -> bool { true }
+    pub fn verify_compliance(_env: &Env, _tx_id: &Bytes) -> bool {
+        true
+    }
 }
 
 /// Privacy-Preserving Swap Integration
@@ -155,7 +165,9 @@ pub mod batch_private_transactions {
     pub struct BatchPrivateProcessor;
 
     impl BatchPrivateProcessor {
-        pub fn new() -> Self { Self }
+        pub fn new() -> Self {
+            Self
+        }
 
         pub fn process_batch(
             &self,
@@ -175,21 +187,15 @@ pub mod privacy_compliance {
     pub struct ComplianceManager;
 
     impl ComplianceManager {
-        pub fn new() -> Self { Self }
+        pub fn new() -> Self {
+            Self
+        }
 
-        pub fn check_transaction_compliance(
-            &self,
-            _env: &Env,
-            _tx: &PrivateTransaction,
-        ) -> bool {
+        pub fn check_transaction_compliance(&self, _env: &Env, _tx: &PrivateTransaction) -> bool {
             true
         }
 
-        pub fn generate_compliance_report(
-            &self,
-            _env: &Env,
-            _tx_id: &Bytes,
-        ) -> ComplianceReport {
+        pub fn generate_compliance_report(&self, _env: &Env, _tx_id: &Bytes) -> ComplianceReport {
             ComplianceReport {
                 is_compliant: true,
                 details: Bytes::new(_env),

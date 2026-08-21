@@ -33,10 +33,7 @@ pub fn get_admin(env: &Env) -> Address {
         .expect("Admin not initialized")
 }
 
-pub fn set_multi_sig_config(
-    env: &Env,
-    config: &MultiSigConfig,
-) -> Result<(), SwapTradeError> {
+pub fn set_multi_sig_config(env: &Env, config: &MultiSigConfig) -> Result<(), SwapTradeError> {
     if config.threshold == 0 || config.threshold > config.signers.len() {
         return Err(SwapTradeError::InvalidMultiSigConfig);
     }

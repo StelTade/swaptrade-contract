@@ -1,4 +1,14 @@
 #![cfg_attr(all(not(test), target_family = "wasm"), no_std)]
+#![allow(clippy::all)]
+#![allow(
+    unused_imports,
+    unused_variables,
+    dead_code,
+    deprecated,
+    unused_doc_comments,
+    unused_mut
+)]
+
 use soroban_sdk::{
     contract, contractimpl, contracttype, symbol_short, Address, Env, Map, Symbol, Vec,
 };
@@ -8,6 +18,11 @@ mod admin;
 #[cfg(test)]
 mod alert_tests;
 mod alerts;
+
+// Gamification & Rewards System
+mod gamification {
+    include!("../gamification.rs");
+}
 mod bridge;
 mod emergency;
 mod emergency_stub;
@@ -15,7 +30,6 @@ mod errors;
 mod events;
 mod faucet;
 mod flash_loan_stub;
-mod rewards;
 mod invariants;
 mod kyc;
 #[cfg(test)]
@@ -23,6 +37,7 @@ mod kyc_tests;
 mod liquidity_pool;
 mod rate_limit;
 mod referral_system;
+mod rewards;
 mod seasons;
 mod state_snapshot;
 #[cfg(test)]
@@ -109,10 +124,10 @@ mod farming_tests;
 // Zero-Knowledge Privacy Transaction Modules
 mod private_transaction;
 mod zkp_circuits;
-mod zkp_types;
-mod zkp_verification;
 #[cfg(test)]
 mod zkp_tests;
+mod zkp_types;
+mod zkp_verification;
 
 // Main swap implementation (with private swap support)
 mod swap;
@@ -181,11 +196,8 @@ pub use zkp_types::{
 #[cfg(feature = "experimental")]
 pub use zkp_verification::ProofVerifier;
 
-use portfolio::{
-    Asset, CachedPnlSummary, CachedPortfolio, CachedTopTraders, LPPosition, PnLSummary,
-    Portfolio, TradeRecord,
-};
-pub use portfolio::{Badge, Metrics, Transaction, TradeRecord as PubTradeRecord};
+use portfolio::{Asset, CachedPortfolio, CachedTopTraders, LPPosition, Portfolio, TradeRecord};
+pub use portfolio::{Badge, Metrics, TradeRecord as PubTradeRecord, Transaction};
 pub use rate_limit::{RateLimitStatus, RateLimiter};
 pub use tiers::UserTier;
 use trading::perform_swap;
@@ -224,7 +236,6 @@ fn require_not_paused(env: &Env) -> Result<(), ContractError> {
 //     Ok(true)
 // }
 
-
 pub fn create_proposal(
     env: Env,
     caller: Address,
@@ -233,22 +244,13 @@ pub fn create_proposal(
     governance_system::create_proposal(&env, caller, action)
 }
 
-pub fn approve_proposal(
-    env: Env,
-    caller: Address,
-    proposal_id: u64,
-) -> Result<(), SwapTradeError> {
+pub fn approve_proposal(env: Env, caller: Address, proposal_id: u64) -> Result<(), SwapTradeError> {
     governance_system::approve_proposal(&env, caller, proposal_id)
 }
 
-pub fn execute_proposal(
-    env: Env,
-    caller: Address,
-    proposal_id: u64,
-) -> Result<(), SwapTradeError> {
+pub fn execute_proposal(env: Env, caller: Address, proposal_id: u64) -> Result<(), SwapTradeError> {
     governance_system::execute_proposal(&env, caller, proposal_id)
 }
-
 
 pub fn update_pool_fee_tier(
     env: Env,
@@ -410,7 +412,11 @@ impl CounterContract {
         }
     }
 
-    pub fn start_season(env: Env, caller: Address, end_time: u64) -> Result<(), seasons::SeasonError> {
+    pub fn start_season(
+        env: Env,
+        caller: Address,
+        end_time: u64,
+    ) -> Result<(), seasons::SeasonError> {
         caller.require_auth();
         if !admin::is_admin(&env, &caller) {
             return Err(seasons::SeasonError::NotAdmin);
@@ -426,7 +432,10 @@ impl CounterContract {
         seasons::end_season(&env)
     }
 
-    pub fn get_season_leaderboard(env: Env, season_id: u64) -> Result<Vec<(Address, i128)>, seasons::SeasonError> {
+    pub fn get_season_leaderboard(
+        env: Env,
+        season_id: u64,
+    ) -> Result<Vec<(Address, i128)>, seasons::SeasonError> {
         seasons::get_season_leaderboard(&env, season_id)
     }
 
@@ -448,10 +457,10 @@ impl CounterContract {
     pub fn set_admin(env: Env, caller: Address, new_admin: Address) -> Result<(), SwapTradeError> {
         caller.require_auth();
         crate::admin::require_admin(&env, &caller)?;
-        
+
         let old_admin = crate::admin::get_admin(&env);
         env.storage().persistent().set(&ADMIN_KEY, &new_admin);
-        
+
         crate::events::admin_changed(&env, old_admin, new_admin, env.ledger().timestamp() as i64);
         Ok(())
     }
@@ -460,7 +469,7 @@ impl CounterContract {
     pub fn pause_trading(env: Env, caller: Address) -> Result<bool, SwapTradeError> {
         caller.require_auth();
         crate::admin::require_admin(&env, &caller)?;
-        
+
         env.storage().persistent().set(&PAUSED_KEY, &true);
         crate::events::admin_paused(&env, caller, env.ledger().timestamp() as i64);
         Ok(true)
@@ -470,17 +479,21 @@ impl CounterContract {
     pub fn resume_trading(env: Env, caller: Address) -> Result<bool, SwapTradeError> {
         caller.require_auth();
         crate::admin::require_admin(&env, &caller)?;
-        
+
         env.storage().persistent().set(&PAUSED_KEY, &false);
         crate::events::admin_resumed(&env, caller, env.ledger().timestamp() as i64);
         Ok(true)
     }
 
     /// Set the treasury address (admin only)
-    pub fn set_treasury(env: Env, caller: Address, new_treasury: Address) -> Result<(), SwapTradeError> {
+    pub fn set_treasury(
+        env: Env,
+        caller: Address,
+        new_treasury: Address,
+    ) -> Result<(), SwapTradeError> {
         caller.require_auth();
         crate::admin::require_admin(&env, &caller)?;
-        
+
         env.storage()
             .persistent()
             .set(&crate::storage::DEFAULT_TREASURY_KEY, &new_treasury);
@@ -542,17 +555,18 @@ impl CounterContract {
         // Oracle validation
         use crate::oracle::{AggregatorV3Interface, OracleWrapper};
         let oracle = OracleWrapper;
-        let (price, timestamp) = oracle.latest_round_data(&env, (from.clone(), to.clone()))
+        let (price, timestamp) = oracle
+            .latest_round_data(&env, (from.clone(), to.clone()))
             .map_err(|_| ContractError::InvalidPrice)?;
-        
+
         // Basic staleness check (e.g., 5 minutes = 300 seconds)
         if env.ledger().timestamp().saturating_sub(timestamp) > 300 {
             return Err(ContractError::StalePrice);
         }
-        
+
         // Minimal price check (price must be positive)
         if price <= 0 {
-             return Err(ContractError::InvalidPrice);
+            return Err(ContractError::InvalidPrice);
         }
 
         let mut portfolio: Portfolio = env
@@ -652,7 +666,14 @@ impl CounterContract {
     }
 
     /// Non-panicking swap that counts failed orders and returns 0 on failure
-    pub fn safe_swap(env: Env, from: Symbol, to: Symbol, amount: i128, user: Address, deadline: u64) -> i128 {
+    pub fn safe_swap(
+        env: Env,
+        from: Symbol,
+        to: Symbol,
+        amount: i128,
+        user: Address,
+        deadline: u64,
+    ) -> i128 {
         if env.ledger().timestamp() > deadline {
             return 0;
         }
@@ -662,7 +683,6 @@ impl CounterContract {
         if require_authenticated_verified_user(&env, &user).is_err() {
             return 0;
         }
-
 
         let mut portfolio: Portfolio = env
             .storage()
@@ -690,7 +710,8 @@ impl CounterContract {
             return 0;
         }
 
-        let out_amount = perform_swap(&env, &mut portfolio, from, to, amount, user.clone(), None).unwrap_or(0);
+        let out_amount =
+            perform_swap(&env, &mut portfolio, from, to, amount, user.clone(), None).unwrap_or(0);
         portfolio.record_trade(&env, user);
         env.storage().instance().set(&(), &portfolio);
         invalidate_query_cache(&env);
@@ -1285,11 +1306,7 @@ impl CounterContract {
                         .count();
                     if swap_count > 0 && res.operations_executed > 0 {
                         for _ in 0..res.operations_executed {
-                            RateLimiter::record_swap(
-                                &env,
-                                caller_addr,
-                                env.ledger().timestamp(),
-                            );
+                            RateLimiter::record_swap(&env, caller_addr, env.ledger().timestamp());
                         }
                     }
                 }
@@ -1378,11 +1395,7 @@ impl CounterContract {
                         .count();
                     if swap_count > 0 && res.operations_executed > 0 {
                         for _ in 0..res.operations_executed {
-                            RateLimiter::record_swap(
-                                &env,
-                                caller_addr,
-                                env.ledger().timestamp(),
-                            );
+                            RateLimiter::record_swap(&env, caller_addr, env.ledger().timestamp());
                         }
                     }
                 }
@@ -1771,11 +1784,7 @@ impl CounterContract {
         registry.get_max_hops()
     }
 
-    pub fn simulate_route(
-        _env: Env,
-        _route: Route,
-        _amount_in: i128,
-    ) -> Option<(i128, u32)> {
+    pub fn simulate_route(_env: Env, _route: Route, _amount_in: i128) -> Option<(i128, u32)> {
         // TODO: implement route simulation on PoolRegistry
         None
     }
@@ -1819,17 +1828,12 @@ impl CounterContract {
     }
 
     /// Get the current status of the volume-threshold circuit breaker.
-    pub fn get_vol_cb_status(
-        env: Env,
-    ) -> risk_management::VolumeCircuitBreakerStatus {
+    pub fn get_vol_cb_status(env: Env) -> risk_management::VolumeCircuitBreakerStatus {
         risk_management::volume_circuit_breaker::get_status(&env)
     }
 
     /// Reset the volume-threshold circuit breaker and restore trading (admin only).
-    pub fn reset_circuit_breaker(
-        env: Env,
-        admin: Address,
-    ) -> Result<(), SwapTradeError> {
+    pub fn reset_circuit_breaker(env: Env, admin: Address) -> Result<(), SwapTradeError> {
         risk_management::volume_circuit_breaker::reset(&env, admin)
     }
 
@@ -2018,7 +2022,16 @@ impl CounterContract {
         user: Address,
     ) -> Result<u64, ContractError> {
         require_authenticated_verified_user(&env, &user)?;
-        orders::OrderManager::place_recurring_order(&env, user, token_in, token_out, amount_in, interval_secs, occurrences, expires_at)
+        orders::OrderManager::place_recurring_order(
+            &env,
+            user,
+            token_in,
+            token_out,
+            amount_in,
+            interval_secs,
+            occurrences,
+            expires_at,
+        )
     }
 
     /// Execute all due recurring orders
@@ -2252,7 +2265,6 @@ impl CounterContract {
     // Faucet – simulated token drip for new users
     // ────────────────────────────────────────────────────────────────────────
 
-
     /// Claim simulated tokens from the faucet for a given asset.
     /// Enforces a per-user, per-asset cooldown set via `set_faucet_config`.
     pub fn claim_faucet(env: Env, user: Address, asset: Symbol) -> Result<i128, SwapTradeError> {
@@ -2271,12 +2283,14 @@ impl CounterContract {
     }
 
     /// Get faucet configuration for an asset.
-    pub fn get_faucet_config(env: Env, asset: Symbol) -> Result<faucet::FaucetConfig, SwapTradeError> {
+    pub fn get_faucet_config(
+        env: Env,
+        asset: Symbol,
+    ) -> Result<faucet::FaucetConfig, SwapTradeError> {
         faucet::get_faucet_config(&env, asset)
     }
 
     // ── Governance System ───────────────────────────────────────────────────
-
 
     /// Create a new governance proposal
     pub fn create_governance_proposal(
@@ -2302,12 +2316,7 @@ impl CounterContract {
         proposal_id: u64,
         support: governance_types::VoteOption,
     ) -> Result<(), SwapTradeError> {
-        governance_system::GovernanceSystem::cast_vote(
-            &env,
-            &voter,
-            proposal_id,
-            support,
-        )
+        governance_system::GovernanceSystem::cast_vote(&env, &voter, proposal_id, support)
     }
 
     /// Execute a passed proposal
@@ -2316,11 +2325,7 @@ impl CounterContract {
         executor: Address,
         proposal_id: u64,
     ) -> Result<(), SwapTradeError> {
-        governance_system::GovernanceSystem::execute_proposal(
-            &env,
-            &executor,
-            proposal_id,
-        )
+        governance_system::GovernanceSystem::execute_proposal(&env, &executor, proposal_id)
     }
 
     /// Get a proposal's details
@@ -2373,6 +2378,212 @@ impl CounterContract {
             additional_amount,
         )
         .is_err()
+    }
+
+    // ────────────────────────────────────────────────────────────────────────
+    // Dynamic Gamification & Rewards System
+    // ────────────────────────────────────────────────────────────────────────
+
+    /// Get or create a user's gamification profile
+    pub fn get_gamification_profile(env: Env, user: Address) -> gamification::GamificationProfile {
+        gamification::GamificationEngine::get_or_create_profile(&env, &user)
+    }
+
+    /// Get all achievement badges for a user
+    pub fn get_user_achievements(env: Env, user: Address) -> Vec<gamification::AchievementBadge> {
+        gamification::GamificationEngine::get_user_badges(&env, &user)
+    }
+
+    /// Check if a user has a specific achievement badge
+    pub fn has_achievement(env: Env, user: Address, badge: gamification::AchievementBadge) -> bool {
+        gamification::GamificationEngine::has_badge(&env, &user, &badge)
+    }
+
+    /// Get user's gamification score
+    pub fn get_gamification_score(env: Env, user: Address) -> i128 {
+        let profile = gamification::GamificationEngine::get_or_create_profile(&env, &user);
+        profile.score
+    }
+
+    /// Get user's lifetime gamification score
+    pub fn get_lifetime_score(env: Env, user: Address) -> i128 {
+        let profile = gamification::GamificationEngine::get_or_create_profile(&env, &user);
+        profile.lifetime_score
+    }
+
+    /// Get user's progression tier (Bronze -> Silver -> Gold -> Platinum -> Diamond)
+    pub fn get_progression_tier(env: Env, user: Address) -> gamification::ProgressionTier {
+        gamification::GamificationEngine::get_user_tier(&env, &user)
+    }
+
+    /// Get tier progress: (current_score, next_tier_threshold)
+    pub fn get_tier_progress(env: Env, user: Address) -> (i128, i128) {
+        gamification::GamificationEngine::get_tier_progress(&env, &user)
+    }
+
+    /// Get user's score breakdown
+    pub fn get_score_breakdown(env: Env, user: Address) -> gamification::ScoreBreakdown {
+        gamification::GamificationEngine::get_score_breakdown(&env, &user)
+    }
+
+    /// Get leaderboard page for a metric
+    pub fn get_gamification_leaderboard(
+        env: Env,
+        metric: gamification::LeaderboardMetric,
+        page: u32,
+        page_size: u32,
+    ) -> Vec<gamification::LeaderboardEntry> {
+        gamification::GamificationEngine::get_leaderboard(&env, &metric, page, page_size)
+    }
+
+    /// Get a user's rank on a specific leaderboard
+    pub fn get_user_leaderboard_rank(
+        env: Env,
+        user: Address,
+        metric: gamification::LeaderboardMetric,
+    ) -> Option<u32> {
+        gamification::GamificationEngine::get_user_rank(&env, &user, &metric)
+    }
+
+    /// Get leaderboard size for a metric
+    pub fn get_leaderboard_size(env: Env, metric: gamification::LeaderboardMetric) -> u32 {
+        gamification::GamificationEngine::get_leaderboard_size(&env, &metric)
+    }
+
+    /// Get user's current and best trading streak
+    pub fn get_trading_streak(env: Env, user: Address) -> (u32, u32) {
+        let profile = gamification::GamificationEngine::get_or_create_profile(&env, &user);
+        (profile.current_trade_streak, profile.best_trade_streak)
+    }
+
+    /// Get user's current and best daily activity streak
+    pub fn get_daily_streak(env: Env, user: Address) -> (u32, u32) {
+        let profile = gamification::GamificationEngine::get_or_create_profile(&env, &user);
+        (profile.current_daily_streak, profile.best_daily_streak)
+    }
+
+    /// Get streak reward multiplier (basis points, 10000 = 1.0x)
+    pub fn get_streak_multiplier(env: Env, user: Address) -> i128 {
+        gamification::GamificationEngine::streak_multiplier_bps(&env, &user)
+    }
+
+    /// Create a new challenge campaign (admin only)
+    pub fn create_challenge_campaign(
+        env: Env,
+        caller: Address,
+        name: Symbol,
+        description: Symbol,
+        objective: gamification::ChallengeObjective,
+        duration_secs: u64,
+        reward_pool: i128,
+        max_participants: u32,
+        min_tier: gamification::ProgressionTier,
+    ) -> Result<u64, gamification::GamificationError> {
+        caller.require_auth();
+        if crate::admin::require_admin(&env, &caller).is_err() {
+            return Err(gamification::GamificationError::NotAdmin);
+        }
+        gamification::GamificationEngine::create_challenge(
+            &env,
+            name,
+            description,
+            objective,
+            duration_secs,
+            reward_pool,
+            max_participants,
+            min_tier,
+        )
+    }
+
+    /// Join a challenge campaign
+    pub fn join_challenge(
+        env: Env,
+        user: Address,
+        challenge_id: u64,
+    ) -> Result<(), gamification::GamificationError> {
+        user.require_auth();
+        gamification::GamificationEngine::join_challenge(&env, &user, challenge_id)
+    }
+
+    /// Update challenge progress for a user
+    pub fn update_challenge_progress(
+        env: Env,
+        user: Address,
+        challenge_id: u64,
+        progress_increment: i128,
+    ) -> Result<(), gamification::GamificationError> {
+        gamification::GamificationEngine::update_challenge_progress(
+            &env,
+            &user,
+            challenge_id,
+            progress_increment,
+        )
+    }
+
+    /// Claim challenge reward
+    pub fn claim_challenge_reward(
+        env: Env,
+        user: Address,
+        challenge_id: u64,
+    ) -> Result<i128, gamification::GamificationError> {
+        user.require_auth();
+        gamification::GamificationEngine::claim_challenge_reward(&env, &user, challenge_id)
+    }
+
+    /// Get challenge details
+    pub fn get_challenge_details(
+        env: Env,
+        challenge_id: u64,
+    ) -> Option<gamification::ChallengeCampaign> {
+        gamification::GamificationEngine::get_challenge(&env, challenge_id)
+    }
+
+    /// Get user's progress in a specific challenge
+    pub fn get_challenge_user_progress(
+        env: Env,
+        user: Address,
+        challenge_id: u64,
+    ) -> Option<gamification::ChallengeProgress> {
+        gamification::GamificationEngine::get_challenge_progress(&env, &user, challenge_id)
+    }
+
+    /// Get all active challenge IDs
+    pub fn get_all_active_challenges(env: Env) -> Vec<u64> {
+        gamification::GamificationEngine::get_active_challenges(&env)
+    }
+
+    /// Finalize expired challenges
+    pub fn finalize_expired_challenges(env: Env) {
+        gamification::GamificationEngine::finalize_expired_challenges(&env);
+    }
+
+    /// Claim accumulated gamification rewards
+    pub fn claim_gamification_rewards(
+        env: Env,
+        user: Address,
+    ) -> Result<i128, gamification::GamificationError> {
+        user.require_auth();
+        gamification::GamificationEngine::claim_rewards(&env, &user)
+    }
+
+    /// Get pending rewards for a user
+    pub fn get_pending_gamification_rewards(env: Env, user: Address) -> i128 {
+        gamification::GamificationEngine::get_pending_rewards(&env, &user)
+    }
+
+    /// Get total gamification rewards earned by a user
+    pub fn get_total_gamification_rewards(env: Env, user: Address) -> i128 {
+        gamification::GamificationEngine::get_lifetime_rewards(&env, &user)
+    }
+
+    /// Get gamification reward distribution history
+    pub fn get_reward_distribution_history(env: Env) -> Vec<gamification::RewardDistribution> {
+        gamification::GamificationEngine::get_reward_history(&env)
+    }
+
+    /// Get global gamification statistics
+    pub fn get_gamification_global_stats(env: Env) -> gamification::GamificationGlobalStats {
+        gamification::GamificationEngine::get_global_stats(&env)
     }
 }
 

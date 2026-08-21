@@ -10,10 +10,7 @@ const FROZEN_KEY: Symbol = symbol_short!("em_frozen");
 
 /// Check if the system is emergency-paused.
 pub fn is_paused(env: &Env) -> bool {
-    env.storage()
-        .persistent()
-        .get(&PAUSED_KEY)
-        .unwrap_or(false)
+    env.storage().persistent().get(&PAUSED_KEY).unwrap_or(false)
 }
 
 /// Set the emergency pause state.
@@ -24,10 +21,7 @@ pub fn set_paused(env: &Env, paused: bool) {
 /// Check if a specific user is frozen.
 pub fn is_frozen(env: &Env, user: Address) -> bool {
     let key = (FROZEN_KEY, user);
-    env.storage()
-        .persistent()
-        .get(&key)
-        .unwrap_or(false)
+    env.storage().persistent().get(&key).unwrap_or(false)
 }
 
 /// Freeze a specific user.

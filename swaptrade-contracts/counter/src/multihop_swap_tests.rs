@@ -9,8 +9,8 @@ use crate::{CounterContract, CounterContractClient};
 const PRECISION: i128 = 1_000_000_000_000_000_000;
 
 fn verify_trader(env: &Env, contract_id: &Address, admin: &Address, trader: &Address) {
-    use crate::kyc::{KYCSystem, KYCStatus};
     use crate::admin::set_admin;
+    use crate::kyc::{KYCStatus, KYCSystem};
     let operator = Address::generate(env);
 
     env.as_contract(contract_id, || {

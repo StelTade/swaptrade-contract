@@ -8,9 +8,7 @@ use soroban_sdk::{
 use crate::{
     admin::{get_multi_sig_config, set_multi_sig_config, MultiSigConfig},
     errors::SwapTradeError,
-    governance_system::{
-        approve_proposal, create_proposal, execute_proposal, ProposalAction,
-    },
+    governance_system::{approve_proposal, create_proposal, execute_proposal, ProposalAction},
 };
 
 #[test]
@@ -26,12 +24,7 @@ fn test_multi_sig_governance() {
     };
     set_multi_sig_config(&env, &config).unwrap();
 
-    let proposal_id = create_proposal(
-        &env,
-        signer1.clone(),
-        ProposalAction::PauseTrading,
-    )
-    .unwrap();
+    let proposal_id = create_proposal(&env, signer1.clone(), ProposalAction::PauseTrading).unwrap();
 
     // Not enough approvals
     assert_eq!(
@@ -73,12 +66,7 @@ fn test_non_signer_approval() {
     };
     set_multi_sig_config(&env, &config).unwrap();
 
-    let proposal_id = create_proposal(
-        &env,
-        signer1.clone(),
-        ProposalAction::PauseTrading,
-    )
-    .unwrap();
+    let proposal_id = create_proposal(&env, signer1.clone(), ProposalAction::PauseTrading).unwrap();
 
     assert_eq!(
         approve_proposal(&env, non_signer, proposal_id).err(),
@@ -97,12 +85,7 @@ fn test_duplicate_approval() {
     };
     set_multi_sig_config(&env, &config).unwrap();
 
-    let proposal_id = create_proposal(
-        &env,
-        signer1.clone(),
-        ProposalAction::PauseTrading,
-    )
-    .unwrap();
+    let proposal_id = create_proposal(&env, signer1.clone(), ProposalAction::PauseTrading).unwrap();
 
     approve_proposal(&env, signer1.clone(), proposal_id).unwrap();
     assert_eq!(

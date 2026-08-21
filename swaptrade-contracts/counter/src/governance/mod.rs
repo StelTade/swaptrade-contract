@@ -31,4 +31,5 @@ pub use governance::{
     DecentralizationStatus,
 };
 #[cfg(test)]
+mod integration_tests;
 pub use admin::AdminController;

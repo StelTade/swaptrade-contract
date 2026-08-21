@@ -300,7 +300,7 @@ mod governance_tests {
             &env,
             &proposer,
             ProposalType::AdminUpgrade(new_admin.clone()),
-            symbol_short!("admin_upgrade"),
+            Symbol::new(&env, "admin_upgrade"),
             86400,
         )
         .unwrap();

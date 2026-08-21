@@ -5,8 +5,8 @@
 
 #[cfg(test)]
 mod zkp_tests {
-    use soroban_sdk::{Env, Address, Bytes};
-    
+    use soroban_sdk::{Address, Bytes, Env};
+
     // These imports would be in the actual test
     // use crate::zkp_types::*;
     // use crate::zkp_verification::ProofVerifier;
@@ -140,7 +140,7 @@ mod zkp_tests {
 /// Extended integration tests
 #[cfg(test)]
 mod zkp_integration_tests {
-    use soroban_sdk::{Env, Address, Symbol};
+    use soroban_sdk::{Address, Env, Symbol};
 
     #[test]
     fn test_private_transaction_workflow() {
