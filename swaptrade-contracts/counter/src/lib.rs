@@ -690,6 +690,222 @@ impl CounterContract {
         out_amount
     }
 
+    // ========== Orderbook limit order functions ==========
+    
+    /// Place a limit order on the orderbook
+    /// Returns the new order ID
+    pub fn place_limit_order(
+        env: Env,
+        base_token: Symbol,
+        quote_token: Symbol,
+        side: crate::orders::OrderSide,
+        amount: i128,
+        price: u128,
+        expires_at: Option<u64>,
+        owner: Address,
+    ) -> Result<u64, crate::errors::ContractError> {
+        require_not_paused(&env)?;
+        require_authenticated_verified_user(&env, &owner)?;
+        
+        // Ensure user has enough balance to place the order
+        let mut portfolio: crate::portfolio::Portfolio = env
+            .storage()
+            .instance()
+            .get(&())
+            .unwrap_or_else(|| crate::portfolio::Portfolio::new(&env));
+        
+        let reserve_token = match side {
+            crate::orders::OrderSide::Buy => quote_token.clone(),
+            crate::orders::OrderSide::Sell => base_token.clone(),
+        };
+        
+        let reserve_amount = match side {
+            crate::orders::OrderSide::Buy => {
+                // For buy orders: reserve quote tokens needed to buy the base amount
+                (amount as u128 * price / crate::trading::PRECISION) as i128
+            },
+            crate::orders::OrderSide::Sell => amount,
+        };
+        
+        let reserve_asset = if reserve_token == symbol_short!("XLM") {
+            crate::portfolio::Asset::XLM
+        } else {
+            crate::portfolio::Asset::Custom(reserve_token)
+        };
+        
+        let current_balance = portfolio.balance_of(&env, reserve_asset, owner.clone());
+        if current_balance < reserve_amount {
+            return Err(crate::errors::ContractError::InvalidAmount);
+        }
+        
+        // Reserve the funds to prevent double spending
+        portfolio.debit(&env, reserve_asset, owner.clone(), reserve_amount);
+        env.storage().instance().set(&(), &portfolio);
+        invalidate_query_cache(&env);
+        
+        // Place the order in the orderbook
+        let order_id = crate::orders::OrderManager::place_limit_order(
+            &env,
+            owner,
+            base_token,
+            quote_token,
+            side,
+            amount,
+            price,
+            expires_at,
+        )?;
+        
+        Ok(order_id)
+    }
+    
+    /// Take (fill) orders from the orderbook as a taker
+    /// Returns list of fills executed
+    pub fn take_order(
+        env: Env,
+        base_token: Symbol,
+        quote_token: Symbol,
+        side: crate::orders::OrderSide,
+        max_amount_base: i128,
+        max_price: Option<u128>,
+        taker: Address,
+    ) -> Result<Vec<crate::orders::FillResult>, crate::errors::ContractError> {
+        require_not_paused(&env)?;
+        require_authenticated_verified_user(&env, &taker)?;
+        
+        // Execute the taker order fill
+        let fills = crate::orders::OrderManager::take_order(
+            &env,
+            taker.clone(),
+            base_token.clone(),
+            quote_token.clone(),
+            side.clone(),
+            max_amount_base,
+            max_price,
+        )?;
+        
+        // Atomically update balances for all fills
+        let mut portfolio: crate::portfolio::Portfolio = env
+            .storage()
+            .instance()
+            .get(&())
+            .unwrap_or_else(|| crate::portfolio::Portfolio::new(&env));
+        
+        for fill in fills.iter() {
+            // Transfer assets between maker and taker
+            match side {
+                crate::orders::OrderSide::Buy => {
+                    // Taker buys base, pays quote
+                    // Taker gets base tokens
+                    let base_asset = if base_token == symbol_short!("XLM") {
+                        crate::portfolio::Asset::XLM
+                    } else {
+                        crate::portfolio::Asset::Custom(base_token.clone())
+                    };
+                    portfolio.credit(&env, base_asset, taker.clone(), fill.filled_amount_base);
+                    
+                    // Maker gets quote tokens
+                    let quote_asset = if quote_token == symbol_short!("XLM") {
+                        crate::portfolio::Asset::XLM
+                    } else {
+                        crate::portfolio::Asset::Custom(quote_token.clone())
+                    };
+                    portfolio.credit(&env, quote_asset, fill.maker.clone(), fill.filled_amount_quote);
+                },
+                crate::orders::OrderSide::Sell => {
+                    // Taker sells base, receives quote
+                    // Taker gets quote tokens
+                    let quote_asset = if quote_token == symbol_short!("XLM") {
+                        crate::portfolio::Asset::XLM
+                    } else {
+                        crate::portfolio::Asset::Custom(quote_token.clone())
+                    };
+                    portfolio.credit(&env, quote_asset, taker.clone(), fill.filled_amount_quote);
+                    
+                    // Maker gets base tokens
+                    let base_asset = if base_token == symbol_short!("XLM") {
+                        crate::portfolio::Asset::XLM
+                    } else {
+                        crate::portfolio::Asset::Custom(base_token.clone())
+                    };
+                    portfolio.credit(&env, base_asset, fill.maker.clone(), fill.filled_amount_base);
+                }
+            }
+        }
+        
+        env.storage().instance().set(&(), &portfolio);
+        invalidate_query_cache(&env);
+        
+        Ok(fills)
+    }
+    
+    /// Cancel an existing order
+    pub fn cancel_order(
+        env: Env,
+        order_id: u64,
+        owner: Address,
+    ) -> Result<(), crate::errors::ContractError> {
+        require_not_paused(&env)?;
+        require_authenticated_verified_user(&env, &owner)?;
+        
+        // Get the order to calculate refund amount
+        let order = crate::orders::OrderManager::get_order(&env, order_id)?;
+        if order.owner != owner {
+            return Err(crate::errors::ContractError::NotAdmin);
+        }
+        
+        // Calculate the amount to refund
+        let (refund_token, refund_amount) = match order.side {
+            crate::orders::OrderSide::Buy => {
+                // For buy orders: refund remaining quote tokens
+                let remaining_quote = (order.amount_remaining as u128 * order.price / crate::trading::PRECISION) as i128;
+                (order.quote_token, remaining_quote)
+            },
+            crate::orders::OrderSide::Sell => {
+                // For sell orders: refund remaining base tokens
+                (order.base_token, order.amount_remaining)
+            }
+        };
+        
+        // Cancel the order in the order manager
+        crate::orders::OrderManager::cancel_order(&env, order_id, owner.clone())?;
+        
+        // Refund the reserved balance
+        let mut portfolio: crate::portfolio::Portfolio = env
+            .storage()
+            .instance()
+            .get(&())
+            .unwrap_or_else(|| crate::portfolio::Portfolio::new(&env));
+        
+        let refund_asset = if refund_token == symbol_short!("XLM") {
+            crate::portfolio::Asset::XLM
+        } else {
+            crate::portfolio::Asset::Custom(refund_token)
+        };
+        
+        portfolio.credit(&env, refund_asset, owner, refund_amount);
+        env.storage().instance().set(&(), &portfolio);
+        invalidate_query_cache(&env);
+        
+        Ok(())
+    }
+    
+    /// Get orderbook snapshot with aggregated top-of-book levels
+    pub fn get_orderbook_snapshot(
+        env: Env,
+        base_token: Symbol,
+        quote_token: Symbol,
+        max_levels: u32,
+    ) -> Result<crate::orders::OrderBookSnapshot, crate::errors::ContractError> {
+        let snapshot = crate::orders::OrderManager::get_orderbook_snapshot(
+            &env,
+            base_token,
+            quote_token,
+            max_levels,
+        )?;
+        
+        Ok(snapshot)
+    }
+
     /// Record a swap execution for a user
     pub fn record_trade(env: Env, user: Address) {
         let mut portfolio: Portfolio = env
