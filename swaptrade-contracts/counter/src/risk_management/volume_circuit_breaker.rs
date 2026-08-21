@@ -1,6 +1,6 @@
-use soroban_sdk::{contracttype, symbol_short, Address, Env, Symbol, Vec};
 use crate::errors::SwapTradeError;
 use crate::events;
+use soroban_sdk::{contracttype, symbol_short, Address, Env, Symbol, Vec};
 
 /// Configuration for the volume-threshold circuit breaker.
 #[contracttype]
@@ -37,7 +37,7 @@ const TRIPPED_KEY: Symbol = symbol_short!("vcb_tri");
 
 // ── Default values ───────────────────────────────────────────────────────────
 
-const DEFAULT_WINDOW_SECS: u64 = 3600;   // 1 hour
+const DEFAULT_WINDOW_SECS: u64 = 3600; // 1 hour
 const DEFAULT_MAX_VOLUME: i128 = 1_000_000_000_000; // 1M tokens (6 decimals)
 
 // ── Admin API ─────────────────────────────────────────────────────────────────
@@ -226,8 +226,8 @@ fn calculate_current_window_volume(env: &Env) -> i128 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use soroban_sdk::{testutils::Address as _, Address, Env};
     use crate::risk_management::volume_circuit_breaker;
+    use soroban_sdk::{testutils::Address as _, Address, Env};
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -479,4 +479,3 @@ mod tests {
         assert!(!tripped); // Already tripped, returns false
     }
 }
-
