@@ -1,0 +1,26 @@
+[package]
+name = "trade-engine"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["lib", "cdylib"]
+doctest = false
+
+[[test]]
+name = "trade_engine_tests"
+path = "tests/trade_engine_tests.rs"
+
+[[test]]
+name = "benchmark_tests"
+path = "tests/benchmark_tests.rs"
+
+[dependencies]
+soroban-sdk = { workspace = true }
+
+[dev-dependencies]
+soroban-sdk = { workspace = true, features = ["testutils"] }
+
+[features]
+logging = []
