@@ -5,6 +5,7 @@ members = [
   "swaptrade-contracts/soroban-ping",
   "swaptrade-contracts/atomic-swap",
   "swaptrade-contracts/governance",
+  "swaptrade-contracts/escrow-dispute",
 ]
 
 [workspace.dependencies]
