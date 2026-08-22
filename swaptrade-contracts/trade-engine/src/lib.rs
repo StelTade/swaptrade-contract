@@ -72,10 +72,14 @@ impl TradeEngineContract {
             }
             OrderSide::Buy => {
                 // Buying base_asset with quote_asset -> escrow quote_asset = (amount * price) / PRICE_PRECISION
-                let quote_amount = (amount as u128)
-                    .saturating_mul(price)
-                    / PRICE_PRECISION;
-                transfer_token(&env, &quote_asset, &owner, &contract_addr, quote_amount as i128)?;
+                let quote_amount = (amount as u128).saturating_mul(price) / PRICE_PRECISION;
+                transfer_token(
+                    &env,
+                    &quote_asset,
+                    &owner,
+                    &contract_addr,
+                    quote_amount as i128,
+                )?;
             }
         }
 
@@ -110,7 +114,8 @@ impl TradeEngineContract {
     pub fn cancel_order(env: Env, owner: Address, order_id: u64) -> Result<(), TradeError> {
         owner.require_auth();
 
-        let mut order = OrderBookManager::get_order(&env, order_id).ok_or(TradeError::OrderNotFound)?;
+        let mut order =
+            OrderBookManager::get_order(&env, order_id).ok_or(TradeError::OrderNotFound)?;
 
         if order.owner != owner {
             return Err(TradeError::Unauthorized);
@@ -124,7 +129,15 @@ impl TradeEngineContract {
 
         order.status = OrderStatus::Cancelled;
         OrderBookManager::save_order(&env, &order);
-        OrderBookManager::remove_order_id(&env, &order.base_asset, &order.quote_asset, order.side.clone(), order_id);
+        OrderBookManager::remove_order_id(
+            &env,
+            &order.base_asset,
+            &order.quote_asset,
+            order.side.clone(),
+            order_id,
+            order.price,
+            unfilled_base,
+        );
 
         let contract_addr = env.current_contract_address();
 
@@ -132,13 +145,24 @@ impl TradeEngineContract {
         if unfilled_base > 0 {
             match order.side {
                 OrderSide::Sell => {
-                    transfer_token(&env, &order.base_asset, &contract_addr, &owner, unfilled_base)?;
+                    transfer_token(
+                        &env,
+                        &order.base_asset,
+                        &contract_addr,
+                        &owner,
+                        unfilled_base,
+                    )?;
                 }
                 OrderSide::Buy => {
-                    let unfilled_quote = (unfilled_base as u128)
-                        .saturating_mul(order.price)
-                        / PRICE_PRECISION;
-                    transfer_token(&env, &order.quote_asset, &contract_addr, &owner, unfilled_quote as i128)?;
+                    let unfilled_quote =
+                        (unfilled_base as u128).saturating_mul(order.price) / PRICE_PRECISION;
+                    transfer_token(
+                        &env,
+                        &order.quote_asset,
+                        &contract_addr,
+                        &owner,
+                        unfilled_quote as i128,
+                    )?;
                 }
             }
         }
