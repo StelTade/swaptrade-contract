@@ -1,0 +1,21 @@
+[package]
+name = "gas-benchmarks"
+version = "0.1.0"
+edition = "2021"
+publish = false
+description = "Gas cost benchmarking suite for SwapTrade Soroban contracts"
+
+[[test]]
+name = "gas_benchmarks"
+path = "tests/gas_benchmarks.rs"
+
+[[test]]
+name = "orderbook_optimization"
+path = "tests/orderbook_optimization.rs"
+
+[dependencies]
+trade-engine = { path = "../trade-engine" }
+soroban-sdk = { workspace = true }
+
+[dev-dependencies]
+soroban-sdk = { workspace = true, features = ["testutils"] }

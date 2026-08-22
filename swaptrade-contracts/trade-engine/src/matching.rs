@@ -6,8 +6,7 @@ use crate::liquidity_pool::PoolManager;
 use crate::orderbook::OrderBookManager;
 use crate::token::transfer_token;
 use crate::types::{
-    FillResult, OrderSide, OrderStatus, TradeExecutionResult, TradeLeg,
-    PRICE_PRECISION,
+    FillResult, OrderSide, OrderStatus, TradeExecutionResult, TradeLeg, PRICE_PRECISION,
 };
 
 pub struct MatchingEngine;
@@ -73,102 +72,162 @@ impl MatchingEngine {
         match leg.side {
             OrderSide::Buy => {
                 // Trader wants to buy base asset by matching against asks (sell orders)
-                let ask_ids = book.ask_order_ids.clone();
-                let mut updated_ask_ids = Vec::new(env);
+                // Iterate ask price levels (prices sorted ascending for best fill)
+                let ask_keys = book.asks.keys();
 
-                for i in 0..ask_ids.len() {
+                for ki in 0..ask_keys.len() {
                     if remaining_base <= 0 {
-                        for k in i..ask_ids.len() {
-                            updated_ask_ids.push_back(ask_ids.get(k).unwrap());
-                        }
                         break;
                     }
 
-                    let order_id = ask_ids.get(i).unwrap();
-                    if let Some(mut order) = OrderBookManager::get_order(env, order_id) {
-                        if (order.status != OrderStatus::Pending && order.status != OrderStatus::PartiallyFilled)
-                            || (order.expires_at > 0 && order.expires_at <= now)
-                        {
-                            continue;
+                    let price = ask_keys.get(ki).unwrap();
+                    let mut order_ids = book.asks.get(price).unwrap();
+
+                    let mut i = 0;
+                    while i < order_ids.len() {
+                        if remaining_base <= 0 {
+                            break;
                         }
 
-                        if leg.limit_price > 0 && order.price > leg.limit_price {
-                            updated_ask_ids.push_back(order_id);
-                            continue;
-                        }
+                        let order_id = order_ids.get(i).unwrap();
+                        if let Some(mut order) = OrderBookManager::get_order(env, order_id) {
+                            if (order.status != OrderStatus::Pending
+                                && order.status != OrderStatus::PartiallyFilled)
+                                || (order.expires_at > 0 && order.expires_at <= now)
+                            {
+                                i += 1;
+                                continue;
+                            }
 
-                        let order_remaining_base = order.amount.saturating_sub(order.filled_amount);
-                        let fill_base = remaining_base.min(order_remaining_base);
-                        let fill_quote = (fill_base as u128)
-                            .saturating_mul(order.price)
-                            / PRICE_PRECISION;
-                        let fill_quote_i128 = fill_quote as i128;
+                            if leg.limit_price > 0 && order.price > leg.limit_price {
+                                i += 1;
+                                continue;
+                            }
 
-                        order.filled_amount = order.filled_amount.saturating_add(fill_base);
-                        if order.filled_amount >= order.amount {
-                            order.status = OrderStatus::Filled;
+                            let order_remaining_base =
+                                order.amount.saturating_sub(order.filled_amount);
+                            let fill_base = remaining_base.min(order_remaining_base);
+                            let fill_quote =
+                                (fill_base as u128).saturating_mul(order.price) / PRICE_PRECISION;
+                            let fill_quote_i128 = fill_quote as i128;
+
+                            order.filled_amount = order.filled_amount.saturating_add(fill_base);
+                            let fully_filled = order.filled_amount >= order.amount;
+                            if fully_filled {
+                                order.status = OrderStatus::Filled;
+                            } else {
+                                order.status = OrderStatus::PartiallyFilled;
+                            }
+
+                            OrderBookManager::save_order(env, &order);
+
+                            // Token Settlement:
+                            // Trader sends quote_asset to Maker
+                            transfer_token(
+                                env,
+                                &leg.quote_asset,
+                                trader,
+                                &order.owner,
+                                fill_quote_i128,
+                            )?;
+                            // Contract releases base_asset (from maker escrow) to Trader
+                            transfer_token(
+                                env,
+                                &leg.base_asset,
+                                &contract_addr,
+                                trader,
+                                fill_base,
+                            )?;
+
+                            // Update price-level aggregate
+                            OrderBookManager::update_level_after_fill(
+                                env, &mut book, &order, fill_base,
+                            );
+
+                            remaining_base -= fill_base;
+                            total_base_accumulated += fill_base;
+                            total_quote_accumulated += fill_quote_i128;
+
+                            let fill = FillResult {
+                                order_id,
+                                maker: order.owner.clone(),
+                                taker: trader.clone(),
+                                base_asset: leg.base_asset.clone(),
+                                quote_asset: leg.quote_asset.clone(),
+                                price: order.price,
+                                filled_base: fill_base,
+                                filled_quote: fill_quote_i128,
+                                filled_via_pool: false,
+                                pool_id: 0,
+                            };
+
+                            emit_fill(env, &fill);
+                            fills.push_back(fill);
+
+                            if fully_filled {
+                                // Remove filled order from the price-level Vec
+                                let mut new_ids = soroban_sdk::Vec::new(env);
+                                for j in 0..order_ids.len() {
+                                    let id = order_ids.get(j).unwrap();
+                                    if id != order_id {
+                                        new_ids.push_back(id);
+                                    }
+                                }
+                                order_ids = new_ids;
+                                // Don't increment i; check the next order at same position
+                            } else {
+                                i += 1;
+                            }
                         } else {
-                            order.status = OrderStatus::PartiallyFilled;
-                            updated_ask_ids.push_back(order_id);
+                            i += 1;
                         }
-
-                        OrderBookManager::save_order(env, &order);
-
-                        // Token Settlement:
-                        // Trader sends quote_asset to Maker
-                        transfer_token(env, &leg.quote_asset, trader, &order.owner, fill_quote_i128)?;
-                        // Contract releases base_asset (from maker escrow) to Trader
-                        transfer_token(env, &leg.base_asset, &contract_addr, trader, fill_base)?;
-
-                        remaining_base -= fill_base;
-                        total_base_accumulated += fill_base;
-                        total_quote_accumulated += fill_quote_i128;
-
-                        let fill = FillResult {
-                            order_id,
-                            maker: order.owner.clone(),
-                            taker: trader.clone(),
-                            base_asset: leg.base_asset.clone(),
-                            quote_asset: leg.quote_asset.clone(),
-                            price: order.price,
-                            filled_base: fill_base,
-                            filled_quote: fill_quote_i128,
-                            filled_via_pool: false,
-                            pool_id: 0,
-                        };
-
-                        emit_fill(env, &fill);
-                        fills.push_back(fill);
                     }
+
+                    // Save the updated order IDs back
+                    book.asks.set(price, order_ids);
                 }
 
-                book.ask_order_ids = updated_ask_ids;
                 OrderBookManager::save_book(env, &book);
 
                 // Fallback Liquidity Pool matching
                 if remaining_base > 0 {
-                    if let Some(mut pool) = PoolManager::get_pool_by_pair(env, &leg.base_asset, &leg.quote_asset) {
-                        let (is_a_to_b, reserve_in, reserve_out) = if pool.asset_a == leg.quote_asset {
-                            (true, pool.reserve_a, pool.reserve_b)
-                        } else {
-                            (false, pool.reserve_b, pool.reserve_a)
-                        };
+                    if let Some(mut pool) =
+                        PoolManager::get_pool_by_pair(env, &leg.base_asset, &leg.quote_asset)
+                    {
+                        let (is_a_to_b, reserve_in, reserve_out) =
+                            if pool.asset_a == leg.quote_asset {
+                                (true, pool.reserve_a, pool.reserve_b)
+                            } else {
+                                (false, pool.reserve_b, pool.reserve_a)
+                            };
 
                         if reserve_in > 0 && reserve_out >= remaining_base {
                             let fee_multiplier = 10_000i128.saturating_sub(pool.fee_bps as i128);
-                            let num = reserve_in.saturating_mul(remaining_base).saturating_mul(10_000i128);
-                            let den = (reserve_out.saturating_sub(remaining_base)).saturating_mul(fee_multiplier);
+                            let num = reserve_in
+                                .saturating_mul(remaining_base)
+                                .saturating_mul(10_000i128);
+                            let den = (reserve_out.saturating_sub(remaining_base))
+                                .saturating_mul(fee_multiplier);
 
                             if den > 0 {
                                 let quote_in = num / den + 1;
                                 let fill_base = remaining_base;
                                 let fill_quote = quote_in;
 
-                                // Token Settlement for Liquidity Pool Buy:
-                                // Trader deposits quote_asset to contract escrow
-                                transfer_token(env, &leg.quote_asset, trader, &contract_addr, fill_quote)?;
-                                // Contract transfers base_asset to trader
-                                transfer_token(env, &leg.base_asset, &contract_addr, trader, fill_base)?;
+                                transfer_token(
+                                    env,
+                                    &leg.quote_asset,
+                                    trader,
+                                    &contract_addr,
+                                    fill_quote,
+                                )?;
+                                transfer_token(
+                                    env,
+                                    &leg.base_asset,
+                                    &contract_addr,
+                                    trader,
+                                    fill_base,
+                                )?;
 
                                 if is_a_to_b {
                                     pool.reserve_a += fill_quote;
@@ -220,96 +279,149 @@ impl MatchingEngine {
 
             OrderSide::Sell => {
                 // Trader wants to sell base asset by matching against bids (buy orders)
-                let bid_ids = book.bid_order_ids.clone();
-                let mut updated_bid_ids = Vec::new(env);
+                // Iterate bid price levels (prices sorted descending for best fill)
+                let bid_keys = book.bids.keys();
 
-                for i in 0..bid_ids.len() {
+                for ki in 0..bid_keys.len() {
                     if remaining_base <= 0 {
-                        for k in i..bid_ids.len() {
-                            updated_bid_ids.push_back(bid_ids.get(k).unwrap());
-                        }
                         break;
                     }
 
-                    let order_id = bid_ids.get(i).unwrap();
-                    if let Some(mut order) = OrderBookManager::get_order(env, order_id) {
-                        if (order.status != OrderStatus::Pending && order.status != OrderStatus::PartiallyFilled)
-                            || (order.expires_at > 0 && order.expires_at <= now)
-                        {
-                            continue;
+                    let price = bid_keys.get(ki).unwrap();
+                    let mut order_ids = book.bids.get(price).unwrap();
+
+                    let mut i = 0;
+                    while i < order_ids.len() {
+                        if remaining_base <= 0 {
+                            break;
                         }
 
-                        if leg.limit_price > 0 && order.price < leg.limit_price {
-                            updated_bid_ids.push_back(order_id);
-                            continue;
-                        }
+                        let order_id = order_ids.get(i).unwrap();
+                        if let Some(mut order) = OrderBookManager::get_order(env, order_id) {
+                            if (order.status != OrderStatus::Pending
+                                && order.status != OrderStatus::PartiallyFilled)
+                                || (order.expires_at > 0 && order.expires_at <= now)
+                            {
+                                i += 1;
+                                continue;
+                            }
 
-                        let order_remaining_base = order.amount.saturating_sub(order.filled_amount);
-                        let fill_base = remaining_base.min(order_remaining_base);
-                        let fill_quote = (fill_base as u128)
-                            .saturating_mul(order.price)
-                            / PRICE_PRECISION;
-                        let fill_quote_i128 = fill_quote as i128;
+                            if leg.limit_price > 0 && order.price < leg.limit_price {
+                                i += 1;
+                                continue;
+                            }
 
-                        order.filled_amount = order.filled_amount.saturating_add(fill_base);
-                        if order.filled_amount >= order.amount {
-                            order.status = OrderStatus::Filled;
+                            let order_remaining_base =
+                                order.amount.saturating_sub(order.filled_amount);
+                            let fill_base = remaining_base.min(order_remaining_base);
+                            let fill_quote =
+                                (fill_base as u128).saturating_mul(order.price) / PRICE_PRECISION;
+                            let fill_quote_i128 = fill_quote as i128;
+
+                            order.filled_amount = order.filled_amount.saturating_add(fill_base);
+                            let fully_filled = order.filled_amount >= order.amount;
+                            if fully_filled {
+                                order.status = OrderStatus::Filled;
+                            } else {
+                                order.status = OrderStatus::PartiallyFilled;
+                            }
+
+                            OrderBookManager::save_order(env, &order);
+
+                            // Token Settlement:
+                            // Trader sends base_asset to Maker
+                            transfer_token(env, &leg.base_asset, trader, &order.owner, fill_base)?;
+                            // Contract releases quote_asset (from maker bid escrow) to Trader
+                            transfer_token(
+                                env,
+                                &leg.quote_asset,
+                                &contract_addr,
+                                trader,
+                                fill_quote_i128,
+                            )?;
+
+                            // Update price-level aggregate
+                            OrderBookManager::update_level_after_fill(
+                                env, &mut book, &order, fill_base,
+                            );
+
+                            remaining_base -= fill_base;
+                            total_base_accumulated += fill_base;
+                            total_quote_accumulated += fill_quote_i128;
+
+                            let fill = FillResult {
+                                order_id,
+                                maker: order.owner.clone(),
+                                taker: trader.clone(),
+                                base_asset: leg.base_asset.clone(),
+                                quote_asset: leg.quote_asset.clone(),
+                                price: order.price,
+                                filled_base: fill_base,
+                                filled_quote: fill_quote_i128,
+                                filled_via_pool: false,
+                                pool_id: 0,
+                            };
+
+                            emit_fill(env, &fill);
+                            fills.push_back(fill);
+
+                            if fully_filled {
+                                let mut new_ids = soroban_sdk::Vec::new(env);
+                                for j in 0..order_ids.len() {
+                                    let id = order_ids.get(j).unwrap();
+                                    if id != order_id {
+                                        new_ids.push_back(id);
+                                    }
+                                }
+                                order_ids = new_ids;
+                            } else {
+                                i += 1;
+                            }
                         } else {
-                            order.status = OrderStatus::PartiallyFilled;
-                            updated_bid_ids.push_back(order_id);
+                            i += 1;
                         }
-
-                        OrderBookManager::save_order(env, &order);
-
-                        // Token Settlement:
-                        // Trader sends base_asset to Maker
-                        transfer_token(env, &leg.base_asset, trader, &order.owner, fill_base)?;
-                        // Contract releases quote_asset (from maker bid escrow) to Trader
-                        transfer_token(env, &leg.quote_asset, &contract_addr, trader, fill_quote_i128)?;
-
-                        remaining_base -= fill_base;
-                        total_base_accumulated += fill_base;
-                        total_quote_accumulated += fill_quote_i128;
-
-                        let fill = FillResult {
-                            order_id,
-                            maker: order.owner.clone(),
-                            taker: trader.clone(),
-                            base_asset: leg.base_asset.clone(),
-                            quote_asset: leg.quote_asset.clone(),
-                            price: order.price,
-                            filled_base: fill_base,
-                            filled_quote: fill_quote_i128,
-                            filled_via_pool: false,
-                            pool_id: 0,
-                        };
-
-                        emit_fill(env, &fill);
-                        fills.push_back(fill);
                     }
+
+                    book.bids.set(price, order_ids);
                 }
 
-                book.bid_order_ids = updated_bid_ids;
                 OrderBookManager::save_book(env, &book);
 
                 // Fallback Liquidity Pool matching
                 if remaining_base > 0 {
-                    if let Some(mut pool) = PoolManager::get_pool_by_pair(env, &leg.base_asset, &leg.quote_asset) {
-                        let (is_a_to_b, reserve_in, reserve_out) = if pool.asset_a == leg.base_asset {
+                    if let Some(mut pool) =
+                        PoolManager::get_pool_by_pair(env, &leg.base_asset, &leg.quote_asset)
+                    {
+                        let (is_a_to_b, reserve_in, reserve_out) = if pool.asset_a == leg.base_asset
+                        {
                             (true, pool.reserve_a, pool.reserve_b)
                         } else {
                             (false, pool.reserve_b, pool.reserve_a)
                         };
 
                         if reserve_in > 0 && reserve_out > 0 {
-                            let fill_quote = PoolManager::get_amount_out(remaining_base, reserve_in, reserve_out, pool.fee_bps)?;
+                            let fill_quote = PoolManager::get_amount_out(
+                                remaining_base,
+                                reserve_in,
+                                reserve_out,
+                                pool.fee_bps,
+                            )?;
                             let fill_base = remaining_base;
 
-                            // Token Settlement for Liquidity Pool Sell:
-                            // Trader deposits base_asset into contract escrow
-                            transfer_token(env, &leg.base_asset, trader, &contract_addr, fill_base)?;
-                            // Contract transfers quote_asset to trader
-                            transfer_token(env, &leg.quote_asset, &contract_addr, trader, fill_quote)?;
+                            transfer_token(
+                                env,
+                                &leg.base_asset,
+                                trader,
+                                &contract_addr,
+                                fill_base,
+                            )?;
+                            transfer_token(
+                                env,
+                                &leg.quote_asset,
+                                &contract_addr,
+                                trader,
+                                fill_quote,
+                            )?;
 
                             if is_a_to_b {
                                 pool.reserve_a += fill_base;
