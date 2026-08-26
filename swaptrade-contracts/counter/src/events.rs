@@ -639,3 +639,157 @@ pub fn gamification_reward_distributed(
         (amount, reason, challenge_id, timestamp),
     );
 }
+
+// ── Advanced Risk Management Events ──────────────────────────────────────────
+
+/// Emitted when a user's daily loss limit is breached.
+///
+/// Topic  : ("DailyLossLimitBreached", user)
+/// Payload: (daily_pnl, max_loss, timestamp)
+pub fn daily_loss_limit_breached(
+    env: &Env,
+    user: Address,
+    daily_pnl: i128,
+    max_loss: i128,
+    timestamp: u64,
+) {
+    env.events().publish(
+        (Symbol::new(env, "DailyLossLimitBreached"), user),
+        (daily_pnl, max_loss, timestamp),
+    );
+}
+
+/// Emitted when a user's daily loss approaches the threshold.
+///
+/// Topic  : ("DailyLossLimitWarning", user)
+/// Payload: (daily_pnl, max_loss, timestamp)
+pub fn daily_loss_limit_warning(
+    env: &Env,
+    user: Address,
+    daily_pnl: i128,
+    max_loss: i128,
+    timestamp: u64,
+) {
+    env.events().publish(
+        (Symbol::new(env, "DailyLossLimitWarning"), user),
+        (daily_pnl, max_loss, timestamp),
+    );
+}
+
+/// Emitted when leverage exceeds the tier limit.
+///
+/// Topic  : ("LeverageLimitBreached", user)
+/// Payload: (current_leverage_x1000, max_leverage_x1000, timestamp)
+pub fn leverage_limit_breached(
+    env: &Env,
+    user: Address,
+    current_leverage_x1000: u32,
+    max_leverage_x1000: u32,
+    timestamp: u64,
+) {
+    env.events().publish(
+        (Symbol::new(env, "LeverageLimitBreached"), user),
+        (current_leverage_x1000, max_leverage_x1000, timestamp),
+    );
+}
+
+/// Emitted when automatic deleveraging is triggered.
+///
+/// Topic  : ("DeleveragingTriggered", user)
+/// Payload: (deleverage_amount, current_leverage_x1000, timestamp)
+pub fn deleveraging_triggered(
+    env: &Env,
+    user: Address,
+    deleverage_amount: i128,
+    current_leverage_x1000: u32,
+    timestamp: u64,
+) {
+    env.events().publish(
+        (Symbol::new(env, "DeleveragingTriggered"), user),
+        (deleverage_amount, current_leverage_x1000, timestamp),
+    );
+}
+
+/// Emitted when an insurance policy is purchased.
+///
+/// Topic  : ("InsurancePolicyPurchased", user)
+/// Payload: (policy_id, coverage_amount, premium, timestamp)
+pub fn insurance_policy_purchased(
+    env: &Env,
+    user: Address,
+    policy_id: u64,
+    coverage_amount: i128,
+    premium: i128,
+    timestamp: u64,
+) {
+    env.events().publish(
+        (Symbol::new(env, "InsurancePolicyPurchased"), user),
+        (policy_id, coverage_amount, premium, timestamp),
+    );
+}
+
+/// Emitted when an insurance claim is paid.
+///
+/// Topic  : ("InsuranceClaimPaid", user)
+/// Payload: (policy_id, loss_amount, payout_amount, timestamp)
+pub fn insurance_claim_paid(
+    env: &Env,
+    user: Address,
+    policy_id: u64,
+    loss_amount: i128,
+    payout_amount: i128,
+    timestamp: u64,
+) {
+    env.events().publish(
+        (Symbol::new(env, "InsuranceClaimPaid"), user),
+        (policy_id, loss_amount, payout_amount, timestamp),
+    );
+}
+
+/// Emitted when counterparty exposure limit is breached.
+///
+/// Topic  : ("CounterpartyExposureBreached", user, counterparty)
+/// Payload: (exposure, max_exposure, timestamp)
+pub fn counterparty_exposure_breached(
+    env: &Env,
+    user: Address,
+    counterparty: Address,
+    exposure: i128,
+    max_exposure: i128,
+    timestamp: u64,
+) {
+    env.events().publish(
+        (
+            Symbol::new(env, "CounterpartyExposureBreached"),
+            user,
+            counterparty,
+        ),
+        (exposure, max_exposure, timestamp),
+    );
+}
+
+/// Emitted when a risk alert is emitted.
+///
+/// Topic  : ("RiskAlertEmitted", user, category)
+/// Payload: (alert_id, severity_tag, utilization_bps, threshold_bps, timestamp)
+pub fn risk_alert_emitted(
+    env: &Env,
+    user: Address,
+    category: Symbol,
+    alert_id: u64,
+    severity_tag: Symbol,
+    utilization_bps: u32,
+    threshold_bps: u32,
+    timestamp: u64,
+) {
+    env.events().publish(
+        (Symbol::new(env, "RiskAlertEmitted"), user, category),
+        (
+            alert_id,
+            severity_tag,
+            utilization_bps,
+            threshold_bps,
+            timestamp,
+        ),
+    );
+}
