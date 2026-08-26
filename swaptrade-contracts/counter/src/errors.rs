@@ -98,6 +98,17 @@ pub enum SwapTradeError {
     FarmingPoolNotFound = 606,
     InsufficientStakedLP = 607,
 
+    // ── Risk Management ─────────────────────────────────────────────────────
+    DailyLossLimitBreached = 610,
+    LeverageLimitExceeded = 611,
+    PositionLimitExceeded = 612,
+    ConcentrationLimitBreached = 613,
+    InsurancePoolFull = 614,
+    InsurancePolicyNotFound = 615,
+    InsuranceClaimDenied = 616,
+    CounterpartyExposureLimit = 617,
+    RiskAlertCritical = 618,
+
     // ── Emergency / circuit-breaker ─────────────────────────────────────────
     NotEmergencyAdmin = 700,
 
