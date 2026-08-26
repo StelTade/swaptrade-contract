@@ -3,9 +3,9 @@ use soroban_sdk::{contracttype, symbol_short, Address, Bytes, Env, Symbol, Vec};
 use crate::errors::SwapTradeError;
 
 /// Storage keys for the upgrade manager
-const UPGRADE_CONFIG_KEY: Symbol = symbol_short!(\"upg_cfg\");
-const UPGRADE_HISTORY_KEY: Symbol = symbol_short!(\"upg_hist\");
-const PENDING_UPGRADE_KEY: Symbol = symbol_short!(\"pupg\");
+const UPGRADE_CONFIG_KEY: Symbol = symbol_short!("upg_cfg");
+const UPGRADE_HISTORY_KEY: Symbol = symbol_short!("upg_hist");
+const PENDING_UPGRADE_KEY: Symbol = symbol_short!("pupg");
 
 /// Configuration for the upgrade manager
 #[contracttype]
@@ -136,7 +136,7 @@ impl UpgradeManager {
         env.storage().persistent().set(&PENDING_UPGRADE_KEY, &pending);
 
         env.events().publish(
-            (symbol_short!(\"upg_prop\"), proposer),
+            (symbol_short!("upg_prop"), proposer),
             new_version,
         );
 
@@ -174,7 +174,7 @@ impl UpgradeManager {
         env.storage().persistent().set(&PENDING_UPGRADE_KEY, &pending);
 
         env.events().publish(
-            (symbol_short!(\"upg_appr\"), approver),
+            (symbol_short!("upg_appr"), approver),
             approval_count,
         );
 
@@ -219,7 +219,7 @@ impl UpgradeManager {
         let current_version: u32 = env
             .storage()
             .instance()
-            .get(&Symbol::short(\"v_code\"))
+            .get(&Symbol::short("v_code"))
             .unwrap_or(1);
 
         let record = UpgradeRecord {
@@ -243,14 +243,14 @@ impl UpgradeManager {
         // Update the version marker
         env.storage()
             .instance()
-            .set(&Symbol::short(\"v_code\"), &pending.new_version);
+            .set(&Symbol::short("v_code"), &pending.new_version);
 
         // Mark as executed
         pending.executed = true;
         env.storage().persistent().set(&PENDING_UPGRADE_KEY, &pending);
 
         env.events().publish(
-            (symbol_short!(\"upg_done\"), executor),
+            (symbol_short!("upg_done"), executor),
             pending.new_version,
         );
 
@@ -306,7 +306,7 @@ impl UpgradeManager {
         env.storage().persistent().remove(&PENDING_UPGRADE_KEY);
 
         env.events()
-            .publish((symbol_short!(\"upg_cancel\"), caller), ());
+            .publish((symbol_short!("upg_cancel"), caller), ());
 
         Ok(())
     }
