@@ -54,6 +54,8 @@ pub struct RiskConfig {
     pub circuit_breaker_window: u64,
     /// Risk score weights for different risk types
     pub risk_weights: RiskWeights,
+    /// Maximum allowed daily loss (absolute value)
+    pub max_daily_loss: i128,
 }
 
 /// Risk score calculation weights
@@ -79,6 +81,7 @@ impl Default for RiskConfig {
                 position_size_weight: 35,
                 volatility_weight: 25,
             },
+            max_daily_loss: 50_000_000_000, // 50K tokens (5% of max_position_per_user)
         }
     }
 }
