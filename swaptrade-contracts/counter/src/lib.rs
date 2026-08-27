@@ -2380,6 +2380,270 @@ impl CounterContract {
         .is_err()
     }
 
+    // ── Daily Loss Limit ─────────────────────────────────────────────────────
+
+    /// Get daily loss limit status for a user
+    pub fn get_daily_loss_status(env: Env, user: Address) -> risk_management::DailyLossStatus {
+        risk_management::daily_loss_limit::get_status(&env, &user)
+    }
+
+    /// Check if a user is halted due to daily loss limit
+    pub fn is_daily_loss_halted(env: Env, user: Address) -> bool {
+        risk_management::daily_loss_limit::is_halted(&env, &user)
+    }
+
+    /// Reset daily loss halt for a user (admin only)
+    pub fn reset_daily_loss_halt(
+        env: Env,
+        caller: Address,
+        user: Address,
+    ) -> Result<(), SwapTradeError> {
+        caller.require_auth();
+        crate::admin::require_admin(&env, &caller)?;
+        risk_management::daily_loss_limit::reset_halt(&env, &user);
+        Ok(())
+    }
+
+    /// Set maximum daily loss threshold (admin only)
+    pub fn set_max_daily_loss(
+        env: Env,
+        caller: Address,
+        max_loss: i128,
+    ) -> Result<(), SwapTradeError> {
+        caller.require_auth();
+        crate::admin::require_admin(&env, &caller)?;
+        risk_management::daily_loss_limit::set_max_daily_loss(&env, max_loss);
+        Ok(())
+    }
+
+    /// Get current maximum daily loss threshold
+    pub fn get_max_daily_loss(env: Env) -> i128 {
+        risk_management::daily_loss_limit::get_max_daily_loss(&env)
+    }
+
+    // ── Leverage Controls ────────────────────────────────────────────────────
+
+    /// Check leverage limits for a user
+    pub fn check_leverage(env: Env, user: Address) -> risk_management::LeverageCheckResult {
+        let portfolio: Portfolio = env
+            .storage()
+            .instance()
+            .get(&())
+            .unwrap_or_else(|| Portfolio::new(&env));
+        risk_management::leverage::check_leverage(&env, &portfolio, &user)
+    }
+
+    /// Get leverage status for a user
+    pub fn get_leverage_status(env: Env, user: Address) -> risk_management::LeverageStatus {
+        risk_management::leverage::get_status(&env, &user)
+    }
+
+    /// Mark leverage as deleveraged after forced sell (admin only)
+    pub fn mark_deleveraged(
+        env: Env,
+        caller: Address,
+        user: Address,
+    ) -> Result<(), SwapTradeError> {
+        caller.require_auth();
+        crate::admin::require_admin(&env, &caller)?;
+        risk_management::leverage::mark_deleveraged(&env, &user);
+        Ok(())
+    }
+
+    /// Set maintenance margin basis points (admin only)
+    pub fn set_maintenance_margin(
+        env: Env,
+        caller: Address,
+        margin_bps: u32,
+    ) -> Result<(), SwapTradeError> {
+        caller.require_auth();
+        crate::admin::require_admin(&env, &caller)?;
+        risk_management::leverage::set_maintenance_margin_bps(&env, margin_bps);
+        Ok(())
+    }
+
+    /// Get maintenance margin basis points
+    pub fn get_maintenance_margin(env: Env) -> u32 {
+        risk_management::leverage::get_maintenance_margin_bps(&env)
+    }
+
+    // ── Insurance Pool ───────────────────────────────────────────────────────
+
+    /// Deposit into the insurance pool
+    pub fn insurance_deposit(
+        env: Env,
+        user: Address,
+        amount: i128,
+    ) -> Result<u32, SwapTradeError> {
+        user.require_auth();
+        risk_management::insurance_pool::deposit(&env, &user, amount)
+            .map_err(|_| SwapTradeError::InvalidAmount)
+    }
+
+    /// Withdraw from the insurance pool
+    pub fn insurance_withdraw(
+        env: Env,
+        user: Address,
+        amount: i128,
+    ) -> Result<i128, SwapTradeError> {
+        user.require_auth();
+        risk_management::insurance_pool::withdraw(&env, &user, amount)
+            .map_err(|_| SwapTradeError::InvalidAmount)
+    }
+
+    /// Purchase an insurance policy
+    pub fn purchase_insurance(
+        env: Env,
+        user: Address,
+        coverage_amount: i128,
+        duration_secs: u64,
+        premium: i128,
+    ) -> Result<u64, SwapTradeError> {
+        user.require_auth();
+        risk_management::insurance_pool::purchase_policy(&env, &user, coverage_amount, duration_secs, premium)
+            .map_err(|e| match e {
+                "pool_at_max_utilization" => SwapTradeError::InsurancePoolFull,
+                _ => SwapTradeError::InvalidAmount,
+            })
+    }
+
+    /// File an insurance claim
+    pub fn file_insurance_claim(
+        env: Env,
+        policy_id: u64,
+        loss_amount: i128,
+    ) -> Result<i128, SwapTradeError> {
+        risk_management::insurance_pool::file_claim(&env, policy_id, loss_amount)
+            .map_err(|e| match e {
+                "policy_not_found" => SwapTradeError::InsurancePolicyNotFound,
+                "insufficient_pool_funds" => SwapTradeError::InsurancePoolFull,
+                _ => SwapTradeError::InsuranceClaimDenied,
+            })
+    }
+
+    /// Get insurance pool status
+    pub fn get_insurance_pool_status(env: Env) -> risk_management::InsurancePoolStatus {
+        risk_management::insurance_pool::get_pool_status(&env)
+    }
+
+    /// Set insurance premium rate (admin only)
+    pub fn set_insurance_premium_rate(
+        env: Env,
+        caller: Address,
+        rate_bps: u32,
+    ) -> Result<(), SwapTradeError> {
+        caller.require_auth();
+        crate::admin::require_admin(&env, &caller)?;
+        risk_management::insurance_pool::set_premium_rate_bps(&env, rate_bps);
+        Ok(())
+    }
+
+    // ── Counterparty Risk ────────────────────────────────────────────────────
+
+    /// Check counterparty exposure limit
+    pub fn check_counterparty_exposure(
+        env: Env,
+        user: Address,
+        counterparty: Address,
+        proposed_value: i128,
+    ) -> bool {
+        risk_management::counterparty_risk::check_exposure(&env, &user, &counterparty, proposed_value)
+    }
+
+    /// Get counterparty exposure status
+    pub fn get_counterparty_status(
+        env: Env,
+        user: Address,
+        counterparty: Address,
+    ) -> risk_management::CounterpartyExposureStatus {
+        risk_management::counterparty_risk::get_exposure_status(&env, &user, &counterparty)
+    }
+
+    /// Get counterparty risk summary for a user
+    pub fn get_counterparty_summary(
+        env: Env,
+        user: Address,
+    ) -> risk_management::counterparty_risk::CounterpartySummary {
+        risk_management::counterparty_risk::get_user_summary(&env, &user)
+    }
+
+    /// Set counterparty risk config (admin only)
+    pub fn set_counterparty_config(
+        env: Env,
+        caller: Address,
+        max_exposure: i128,
+        window_secs: u64,
+    ) -> Result<(), SwapTradeError> {
+        caller.require_auth();
+        crate::admin::require_admin(&env, &caller)?;
+        let config = risk_management::counterparty_risk::CounterpartyConfig {
+            max_counterparty_exposure: max_exposure,
+            window_secs,
+            max_counterparties: 50,
+        };
+        risk_management::counterparty_risk::set_config(&env, &config);
+        Ok(())
+    }
+
+    // ── Risk Alerts ──────────────────────────────────────────────────────────
+
+    /// Get risk alert status for a user
+    pub fn get_risk_alert_status(env: Env, user: Address) -> risk_management::AlertStatus {
+        risk_management::risk_alerts::get_alert_status(&env, &user)
+    }
+
+    /// Get active risk alerts for a user
+    pub fn get_user_risk_alerts(env: Env, user: Address) -> Vec<risk_management::RiskAlert> {
+        risk_management::risk_alerts::get_user_alerts(&env, &user)
+    }
+
+    /// Acknowledge a risk alert
+    pub fn acknowledge_risk_alert(
+        env: Env,
+        user: Address,
+        alert_id: u64,
+    ) -> bool {
+        user.require_auth();
+        risk_management::risk_alerts::acknowledge_alert(&env, &user, alert_id)
+    }
+
+    /// Dismiss all risk alerts for a user
+    pub fn dismiss_all_risk_alerts(env: Env, user: Address) -> u32 {
+        user.require_auth();
+        risk_management::risk_alerts::dismiss_all(&env, &user)
+    }
+
+    /// Set alert thresholds (admin only)
+    pub fn set_alert_config(
+        env: Env,
+        caller: Address,
+        info_bps: u32,
+        warning_bps: u32,
+        critical_bps: u32,
+    ) -> Result<(), SwapTradeError> {
+        caller.require_auth();
+        crate::admin::require_admin(&env, &caller)?;
+        let config = risk_management::risk_alerts::AlertConfig {
+            info_threshold_bps: info_bps,
+            warning_threshold_bps: warning_bps,
+            critical_threshold_bps: critical_bps,
+        };
+        risk_management::risk_alerts::set_alert_config(&env, &config);
+        Ok(())
+    }
+
+    // ── Comprehensive Risk Metrics ───────────────────────────────────────────
+
+    /// Get comprehensive risk metrics for a user
+    pub fn get_risk_metrics(env: Env, user: Address) -> risk_management::RiskMetrics {
+        let portfolio: Portfolio = env
+            .storage()
+            .instance()
+            .get(&())
+            .unwrap_or_else(|| Portfolio::new(&env));
+        risk_management::portfolio::PortfolioRisk::calculate_risk_metrics(&env, &portfolio, &user)
+    }
+
     // ────────────────────────────────────────────────────────────────────────
     // Dynamic Gamification & Rewards System
     // ────────────────────────────────────────────────────────────────────────
