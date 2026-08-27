@@ -8,6 +8,7 @@ members = [
   "swaptrade-contracts/escrow-dispute",
   "swaptrade-contracts/trade-engine",
   "swaptrade-contracts/portfolio-analytics",
+  "swaptrade-contracts/gas-benchmarks",
 ]
 
 [workspace.dependencies]
