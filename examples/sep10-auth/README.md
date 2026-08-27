@@ -1,146 +1,151 @@
-# SEP-10 Authentication for SwapTrade (Reference Implementation)
+# SEP-10 / Soroban-Compatible Authentication Patterns
 
-Issue #260 — SEP-10 / Soroban-compatible authentication patterns and
-examples for secure user onboarding into swaps and approvals.
-
-This package is a dependency-light, fully offline reference implementation of
-the [SEP-10](https://github.com/stellar/stellar-protocol/blob/master/ecosystem/sep-0010.md)
-challenge/response flow, plus two integration patterns showing how an
-authenticated identity gates **Soroban contract invocations**. It is written
-in TypeScript with no runtime dependencies other than `tweetnacl` (ed25519),
-so it runs anywhere the SwapTrade backend runs.
+Reference implementation of [SEP-10](https://github.com/stellar/stellar-protocol/blob/master/ecosystem/sep-0010.md)
+(Stellar Web Authentication) for SwapTrade: a working challenge-response
+backend, replay protection, and the patterns for gating Soroban contract
+invocations behind verified sessions.
 
 ```
-src/sep10.ts     challenge creation + verification, strkey codec,
-                 session tokens (JWT analogue), replay guard
-src/gating.ts    Sep10Gate: session-gated contract intents and a
-                 fee-sponsored relayer flow with signed intents
-__tests__/       14 tests: accepted flows, rejected flows, replay protection
+┌────────┐  GET /auth?account=G…   ┌─────────┐
+│ client │ ───────────────────────►│ backend │  builds challenge tx
+│        │◄─────────────────────── │         │  (source=client, seq=0,
+│        │  signed challenge XDR   │         │   manageData "<domain> auth")
+│        │                         │         │
+│ signs  │  POST /auth {transaction}          server co-signs first;
+│ with   │ ───────────────────────►│         │  backend verifies both
+│ wallet │  session token          │         │  signatures + replay guard
+└────────┘◄─────────────────────── └─────────┘
+     │
+     │ POST /invoke  (Bearer token + user-signed envelope)
+     ▼
+Soroban RPC → atomic-swap contract
 ```
+
+## What's in here
+
+| File | Purpose |
+| --- | --- |
+| `src/sep10.ts` | Challenge construction, client co-signing helper, full server-side verification |
+| `src/token.ts` | Dependency-free HMAC session tokens bound to the consumed challenge nonce |
+| `src/nonce-store.ts` | Single-use nonce registry (the replay guard) |
+| `src/middleware.ts` | Bearer-token gate for any endpoint that touches contract state |
+| `src/contract-gate.ts` | Allowlist policy + relayer safety checks for Soroban invocations |
+| `src/server.ts` | Runnable `node:http` demo wiring everything together |
+| `test/sep10.test.ts` | 21 tests: accepted/rejected flows and replay protection |
+| `docs/SOROBAN-INTEGRATION.md` | On-chain side: verifying SEP-10-bound payloads inside a Soroban contract |
 
 ## Quick start
 
 ```bash
-cd examples/sep10-auth
-npm install        # --ignore-scripts is fine; tweetnacl has none anyway
-npm test           # 14 passing tests
-npx tsc --noEmit   # strict typecheck
+npm install
+npm test        # builds then runs the test suite (node:test, no extra deps)
+npm run demo    # starts the demo server on :8787
 ```
 
-## The flow, step by step
+## Step by step
 
-### 1. Server issues a challenge
+### 1. Client requests a challenge
+
+```bash
+curl "http://localhost:8787/auth?account=GCLIENT..."
+# {
+#   "transaction": "<base64 XDR challenge>",
+#   "nonce": "...",            // opaque; tracked server-side
+#   "clientAccountId": "GCLIENT..."
+# }
+```
+
+The challenge is a transaction whose **source account is the client**
+(that is how it names its subject) with **sequence number 0**, containing
+one `manageData` operation named `<domain> auth` carrying **64 random
+bytes**, valid between *now* and *now + 300 s*. The backend signs it first
+with its domain account key.
+
+### 2. Client co-signs
+
+Wherever the user's secret lives (Freighter, wallet, custodial signer):
 
 ```ts
-import { createChallenge } from "./src/sep10.js";
+import { TransactionBuilder } from "@stellar/stellar-sdk";
 
-const serverSeedHex = "...64 hex chars...";            // server signing key seed
-const { challenge, signedPayload } = createChallenge(
-  serverSeedHex,
-  clientAccountIdGStrKey,
-  Math.floor(Date.now() / 1000),
-  "dapp.example.com",                                   // optional client_domain
-);
-// `signedPayload` is the canonical byte string both parties sign.
-// Sign it with the SERVER key and return { challenge, serverSignature }
-// to the client.
+const tx = TransactionBuilder.fromXDR(challenge.transaction, Networks.TESTNET);
+tx.sign(clientKeypair); // e.g. Freighter sign transaction
+const signed = tx.toXDR();
 ```
 
-In full SEP-10 this payload is carried inside a Stellar transaction with
-`manage_data` operations (`swaptrade auth` -> nonce,
-`swaptrade client_domain` -> domain). The signing and verification rules are
-identical; swap this layer for `@stellar/stellar-sdk`'s transaction builder
-when wiring against a real anchor/domain server.
+`signChallenge()` in `src/sep10.ts` does the same for non-wallet clients.
 
-### 2. Client countersigns
+### 3. Backend verifies and issues a session
 
-```ts
-import { signBytes } from "./src/sep10.js";
-const clientSignature = signBytes(signedPayload, clientSeedHex);
+```bash
+curl -X POST http://localhost:8787/auth \
+  -H 'content-type: application/json' \
+  -d '{"transaction":"<co-signed XDR>"}'
+# { "token": "<payload>.<hmac>", "expires_at": 1700001200 }
 ```
 
-The client signs with the ed25519 key matching its `G...` account — exactly
-what Stellar wallets (Freighter, etc.) do during SEP-10 web auth.
+Verification (`verifyChallenge`) enforces, in order:
 
-### 3. Server verifies and mints a session token
+1. envelope decodes for the configured network passphrase;
+2. sequence number is exactly `0`;
+3. exactly one `manageData` operation, named `<domain> auth`,
+   sourced by the server's domain account, value decoding to 64 bytes;
+4. timebounds still satisfied (5 s clock skew tolerated);
+5. signature set is exactly `{server, client}` — every signature must be
+   attributable to one of those two keys over the transaction hash;
+6. the nonce has never been redeemed (**replay protection**).
 
-```ts
-import nacl from "tweetnacl";
-import { Sep10Gate } from "./src/gating.js";
+Failures return a uniform `401`; specifics go to logs only, so attackers
+learn nothing about which check tripped.
 
-const gate = new Sep10Gate(serverPublicKeyRaw, serverSeedHex);
+### 4. Gate contract invocations with the session
 
-const result = gate.completeChallenge(challenge, serverSig, clientSig);
-if (!result.allowed) throw new Error(result.reason);
-const sessionToken = result.token!;   // HMAC-signed, expiring JWT analogue
+```bash
+curl -X POST http://localhost:8787/invoke \
+  -H "authorization: Bearer $TOKEN" \
+  -H 'content-type: application/json' \
+  -d '{"contractId":"C…","functionName":"get_quote","args":[42],
+       "signedEnvelopeXdr":"<user-signed invoke envelope>"}'
 ```
 
-Verification enforces all SEP-10 core rules:
+Two independent gates run before anything reaches Soroban RPC:
 
-| Rule | Where |
+* **Policy** (`authorizeInvocation`) — allowlisted contracts/functions per
+  session tier, plus a per-session invocation quota keyed by the token's
+  `jti`.
+* **Relayer safety** (`verifyUserAuthorization`) — because the backend pays
+  fees, it refuses to submit unless the *envelope source equals the SEP-10
+  session subject* and *that account actually signed these exact
+  operations*. A compromised or malicious client cannot get the relayer to
+  fund arbitrary executions.
+
+See `docs/SOROBAN-INTEGRATION.md` for the on-chain mirror of this check
+(verifying a SEP-10-bound payload inside a Soroban contract via
+`ed25519_verify`).
+
+## Security properties tested
+
+| Threat | Test |
 | --- | --- |
-| Both signatures present and valid | `verifyChallenge` |
-| Server signature binds the advertised server account | step 1 of `verifyChallenge` |
-| Client signature matches `challenge.clientAccount` | step 2 of `verifyChallenge` |
-| Challenge used within its validity window | time check in `verifyChallenge` |
-| Challenge nonce single-use (replay protection) | `ReplayGuard` in `Sep10Gate.completeChallenge` |
+| Tampered challenge bytes | rejected (signature mismatch or decode failure) |
+| Wrong signer / impostor | `UNKNOWN_SIGNER` |
+| Missing server signature (forged challenge) | `MISSING_SIGNATURE` |
+| Expired challenge | `TIMEBOUNDS` |
+| Future-dated challenge | `TIMEBOUNDS` |
+| Replayed (already-redeemed) challenge | `NONCE_REPLAY` |
+| Non-zero sequence number | `BAD_SEQUENCE` |
+| Smuggled extra operations | `UNEXPECTED_OPERATION` |
+| Garbage input | rejected |
+| Expired / forged session token | rejected (constant-time MAC compare) |
+| Off-policy contract call | `FORBIDDEN_TARGET` |
+| Session quota exhaustion | `SESSION_QUOTA` |
+| Relayer tricked into unsigned submission | rejected |
 
-### 4a. Gate contract-invoking operations on the session
+## Production checklist
 
-```ts
-const intent = {
-  contractId: "CAS3J7GYLGXMF6TDJBBYYE3JNNFRVLDDTT6E8B2LNL4N25Q6YVGB72PI",
-  functionName: "execute_swap",
-  args: [{ amount: "100000000" }],
-  nonce: nextNonce(),
-};
-
-const verdict = gate.authorizeWithToken(sessionToken, intent);
-if (!verdict.allowed) return res.status(401).json({ error: verdict.reason });
-
-// Safe to relay: build & submit the Soroban invocation here, using
-// verdict.account as the authorization entry signer / source account.
-await sorobanServer.submitTransaction(buildInvocation(verdict.account!, intent));
-```
-
-On-chain authorization stays anchored to the authenticated identity because
-the relayer uses the verified account in the Soroban auth entry rather than
-trusting a client-supplied address.
-
-### 4b. Fee-sponsored relayer with signed intents
-
-For flows where the backend pays fees, clients sign the *intent* itself:
-
-```ts
-import { intentPayload } from "./src/gating.js";
-const signature = signBytes(intentPayload(intent), clientSeedHex);
-
-const verdict = gate.authorizeSignedIntent(clientAccountId, intent, signature);
-```
-
-The relayer validates the ed25519 signature against the claimed account and
-enforces per-account single-use `(contract, function, args, nonce)` tuples,
-preventing both forgery and replay.
-
-## Adopting SEP-10 in your DApp (GrantFox / Stellar support eligibility)
-
-Stellar and GrantFox look for standards-compliant authentication when
-evaluating DApps. To adopt:
-
-1. Run an auth endpoint implementing steps 1–3 above (or use a hosted
-   anchor's `/auth`).
-2. Treat the resulting token as your session credential; never accept raw
-   account ids from request bodies for privileged operations.
-3. Gate every contract-invoking route through pattern 4a or 4b.
-4. Keep nonces single-use and challenges short-lived (15 min default) —
-   both are enforced by this module.
-
-## Test coverage
-
-`npm test` exercises:
-
-- accepted end-to-end challenge -> token -> gated invocation
-- rejected flows: wrong client key, tampered payloads, expired/out-of-window
-  challenges, forged/expired session tokens, malformed accounts
-- replay protections: reused challenge nonce, repeated intent under a fresh
-  token, repeated signed intent at the relayer
+- Load `sessionSecret` and `SEP10_SERVER_SECRET` from a secret manager.
+- Replace the in-memory `NonceStore` with a shared store (Redis) when you
+  run more than one backend replica.
+- Anchor domain TOML: publish your auth server under `AUTH_SERVER` /
+  `WEB_AUTH_FOR_CONTRACTS` so wallets can discover it.
+- Consider rotating the HMAC secret with overlapping validity windows.
