@@ -258,7 +258,7 @@ fn execute_single_operation(
             }
             
             // Perform the swap
-            let out_amount = perform_swap(env, portfolio, from.clone(), to.clone(), *amount, user.clone());
+            let out_amount = perform_swap(env, portfolio, from.clone(), to.clone(), *amount, user.clone(), None).map_err(|e| Symbol::new(env, &format!("{:?}", e)))?;
             portfolio.record_trade(env, user.clone());
             Ok(out_amount)
         }

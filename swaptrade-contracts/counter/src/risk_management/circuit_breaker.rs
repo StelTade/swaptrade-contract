@@ -99,7 +99,7 @@ impl CircuitBreaker {
                 if current_data.price > 0 {
                     let inverted = (1_000_000_000_000_000_000u128 * 1_000_000_000_000_000_000u128)
                         / current_data.price;
-                    prices.push((current_data.timestamp, inverted));
+                    prices.push_back((current_data.timestamp, inverted));
                 }
             }
         }

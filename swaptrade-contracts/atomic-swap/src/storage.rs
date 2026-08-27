@@ -39,11 +39,7 @@ fn save_nonce_index(env: &Env, map: &Map<(Address, u64), u64>) {
 // ── ID & config ──────────────────────────────────────────────
 
 pub fn next_id(env: &Env) -> u64 {
-    let id: u64 = env
-        .storage()
-        .persistent()
-        .get(&NEXT_ID_KEY)
-        .unwrap_or(1u64);
+    let id: u64 = env.storage().persistent().get(&NEXT_ID_KEY).unwrap_or(1u64);
     env.storage().persistent().set(&NEXT_ID_KEY, &(id + 1));
     id
 }
@@ -99,11 +95,8 @@ pub fn has_trustline(env: &Env, address: &Address, asset: &Address) -> bool {
     // `try_invoke_contract` returns Result<Result<T, E>, InvokeError>.
     // We only care whether the outer + inner are both Ok.
     let args: Vec<soroban_sdk::Val> = Vec::from_array(env, [address.to_val()]);
-    let result = env.try_invoke_contract::<i128, SwapError>(
-        asset,
-        &Symbol::new(env, "balance"),
-        args,
-    );
+    let result =
+        env.try_invoke_contract::<i128, SwapError>(asset, &Symbol::new(env, "balance"), args);
     matches!(result, Ok(Ok(_)))
 }
 
@@ -118,16 +111,10 @@ fn invoke_transfer(
     to: &Address,
     amount: i128,
 ) -> Result<i128, SwapError> {
-    let args: Vec<soroban_sdk::Val> = soroban_sdk::vec![env,
-        from.to_val(),
-        to.to_val(),
-        amount.into_val(env),
-    ];
-    let result = env.try_invoke_contract::<i128, SwapError>(
-        asset,
-        &Symbol::new(env, "transfer"),
-        args,
-    );
+    let args: Vec<soroban_sdk::Val> =
+        soroban_sdk::vec![env, from.to_val(), to.to_val(), amount.into_val(env),];
+    let result =
+        env.try_invoke_contract::<i128, SwapError>(asset, &Symbol::new(env, "transfer"), args);
     match result {
         Ok(Ok(transferred)) => Ok(transferred),
         Ok(Err(_swap_err)) => Err(SwapError::TransferMismatch),

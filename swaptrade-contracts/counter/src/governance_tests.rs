@@ -299,10 +299,8 @@ mod governance_tests {
         let proposal_id = GovernanceSystem::create_proposal(
             &env,
             &proposer,
-            ProposalType::AdminUpgrade {
-                new_admin: new_admin.clone(),
-            },
-            symbol_short!("admin_upgrade"),
+            ProposalType::AdminUpgrade(new_admin.clone()),
+            Symbol::new(&env, "admin_upgrade"),
             86400,
         )
         .unwrap();

@@ -236,20 +236,20 @@ impl PoolRegistry {
             .get(pool_id)
             .ok_or(ContractError::LPPositionNotFound)?;
 
+        let token_a = pool.token_a.clone();
+        let token_b = pool.token_b.clone();
         let fees_a = pool.accumulated_fees_a;
         let fees_b = pool.accumulated_fees_b;
 
-        // Reset accumulated fees
         pool.accumulated_fees_a = 0;
         pool.accumulated_fees_b = 0;
         self.pools.set(pool_id, pool);
 
-        // Publish events
         if fees_a > 0 {
-            crate::events::fees_distributed(env, pool_id, pool.token_a, fees_a, treasury.clone());
+            crate::events::fees_distributed(env, pool_id, token_a, fees_a, treasury.clone());
         }
         if fees_b > 0 {
-            crate::events::fees_distributed(env, pool_id, pool.token_b, fees_b, treasury);
+            crate::events::fees_distributed(env, pool_id, token_b, fees_b, treasury);
         }
 
         Ok((fees_a, fees_b))
@@ -421,7 +421,9 @@ impl PoolRegistry {
         let (norm_in, norm_out) = Self::normalize_pair(token_in.clone(), token_out.clone());
         if let Some(pool_id) = self.pair_to_pool.get((norm_in, norm_out)) {
             if let Some(pool) = self.pools.get(pool_id) {
-                let output = self.calculate_output(&pool, token_in.clone(), amount_in).ok()?;
+                let output = self
+                    .calculate_output(&pool, token_in.clone(), amount_in)
+                    .ok()?;
                 let impact = self.calculate_price_impact(&pool, token_in.clone(), amount_in);
                 let mut pools = Vec::new(env);
                 pools.push_back(pool_id);
@@ -452,10 +454,12 @@ impl PoolRegistry {
                             Self::normalize_pair(intermediate.clone(), token_out.clone());
                         if let Some(pool2_id) = self.pair_to_pool.get((norm_int, norm_out)) {
                             if let Some(pool2) = self.pools.get(pool2_id) {
-                                let out1 =
-                                    self.calculate_output(&pool1, token_in.clone(), amount_in)?;
-                                let out2 =
-                                    self.calculate_output(&pool2, intermediate.clone(), out1)?;
+                                let out1 = self
+                                    .calculate_output(&pool1, token_in.clone(), amount_in)
+                                    .ok()?;
+                                let out2 = self
+                                    .calculate_output(&pool2, intermediate.clone(), out1)
+                                    .ok()?;
                                 let impact1 = self.calculate_price_impact(
                                     &pool1,
                                     token_in.clone(),

@@ -27,10 +27,17 @@ impl MultiAssetStaking {
     }
 
     pub fn set_reward_rate(&mut self, asset: &str, rate_bps_per_sec: u64) {
-        self.reward_rates.insert(asset.to_string(), rate_bps_per_sec);
+        self.reward_rates
+            .insert(asset.to_string(), rate_bps_per_sec);
     }
 
-    pub fn stake(&mut self, staker: &str, asset: &str, amount: u128, now: u64) -> Result<(), String> {
+    pub fn stake(
+        &mut self,
+        staker: &str,
+        asset: &str,
+        amount: u128,
+        now: u64,
+    ) -> Result<(), String> {
         if amount == 0 {
             return Err("stake amount must be greater than zero".to_string());
         }

@@ -1,6 +1,10 @@
 #![cfg(test)]
 
-use soroban_sdk::{symbol_short, testutils::{Address as _, Ledger}, Address, Env, Vec};
+use soroban_sdk::{
+    symbol_short,
+    testutils::{Address as _, Ledger},
+    Address, Env, Vec,
+};
 
 use crate::alerts::{
     check_market_alerts, check_portfolio_alerts, check_price_alerts, cleanup_alerts,

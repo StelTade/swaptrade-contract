@@ -142,8 +142,10 @@ impl Events {
     }
 
     pub fn admin_changed(env: &Env, old_admin: Address, new_admin: Address, timestamp: i64) {
-        env.events()
-            .publish((Symbol::new(env, "AdminChanged"),), (old_admin, new_admin, timestamp));
+        env.events().publish(
+            (Symbol::new(env, "AdminChanged"),),
+            (old_admin, new_admin, timestamp),
+        );
     }
 
     pub fn faucet_claimed(env: &Env, user: Address, asset: Symbol, amount: i128, timestamp: u64) {
@@ -152,6 +154,37 @@ impl Events {
             (amount, timestamp),
         );
     }
+}
+
+// ── Free-function wrappers so callers can use `crate::events::function_name(…)` ──
+
+pub fn admin_paused(env: &Env, admin: Address, timestamp: i64) {
+    Events::admin_paused(env, admin, timestamp);
+}
+
+pub fn admin_resumed(env: &Env, admin: Address, timestamp: i64) {
+    Events::admin_resumed(env, admin, timestamp);
+}
+
+pub fn admin_changed(env: &Env, old_admin: Address, new_admin: Address, timestamp: i64) {
+    Events::admin_changed(env, old_admin, new_admin, timestamp);
+}
+
+pub fn fee_parameters_updated(
+    env: &Env,
+    pool_id: u64,
+    new_fee_rate: u32,
+    new_treasury: Option<Address>,
+) {
+    Events::fee_parameters_updated(env, pool_id, new_fee_rate, new_treasury);
+}
+
+pub fn fees_distributed(env: &Env, pool_id: u64, token: Symbol, amount: i128, recipient: Address) {
+    Events::fees_distributed(env, pool_id, token, amount, recipient);
+}
+
+pub fn fees_collected(env: &Env, token: Symbol, amount: i128, pool_id: u64) {
+    Events::fees_collected(env, token, amount, pool_id);
 }
 
 /// Emitted whenever an alert fires. Carries enough metadata for an
@@ -482,13 +515,7 @@ pub fn stake_created(
 ///
 /// Topic  : ("StakeClaimed", user, stake_id)
 /// Payload: (amount, timestamp)
-pub fn stake_claimed(
-    env: &Env,
-    user: Address,
-    stake_id: i128,
-    amount: i128,
-    timestamp: i64,
-) {
+pub fn stake_claimed(env: &Env, user: Address, stake_id: i128, amount: i128, timestamp: i64) {
     env.events().publish(
         (Symbol::new(env, "StakeClaimed"), user, stake_id),
         (amount, timestamp),
@@ -559,6 +586,56 @@ pub fn route_found(
 ) {
     env.events().publish(
         (Symbol::new(env, "RouteFound"),),
-        (token_in, token_out, amount_in, expected_output, num_hops, timestamp),
+        (
+            token_in,
+            token_out,
+            amount_in,
+            expected_output,
+            num_hops,
+            timestamp,
+        ),
+    );
+}
+
+// Gamification System Events
+
+pub fn achievement_badge_awarded(
+    env: &Env,
+    user: Address,
+    badge_tag: Symbol,
+    points: i128,
+    timestamp: i64,
+) {
+    env.events().publish(
+        (Symbol::new(env, "AchvBadgeAwarded"), user),
+        (badge_tag, points, timestamp),
+    );
+}
+
+pub fn score_updated(
+    env: &Env,
+    user: Address,
+    old_score: i128,
+    new_score: i128,
+    reason: Symbol,
+    timestamp: i64,
+) {
+    env.events().publish(
+        (Symbol::new(env, "ScoreUpdated"), user),
+        (old_score, new_score, reason, timestamp),
+    );
+}
+
+pub fn gamification_reward_distributed(
+    env: &Env,
+    user: Address,
+    amount: i128,
+    reason: Symbol,
+    challenge_id: Option<u64>,
+    timestamp: i64,
+) {
+    env.events().publish(
+        (Symbol::new(env, "GamRwdDist"), user),
+        (amount, reason, challenge_id, timestamp),
     );
 }

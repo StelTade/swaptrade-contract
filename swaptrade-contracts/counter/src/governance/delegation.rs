@@ -1,4 +1,4 @@
-use soroban_sdk::{contracttype, symbol_short, Address, Env, Symbol, Map};
+use soroban_sdk::{contracttype, symbol_short, Address, Env, Map, Symbol};
 
 use crate::errors::SwapTradeError;
 
@@ -29,10 +29,8 @@ pub fn delegate_vote(
         .persistent()
         .set(&DELEGATIONS_KEY, &delegations);
 
-    env.events().publish(
-        (symbol_short!("del_vote")),
-        (delegator, delegate),
-    );
+    env.events()
+        .publish((symbol_short!("del_vote"),), (delegator, delegate));
 
     Ok(())
 }
@@ -52,7 +50,7 @@ pub fn revoke_delegation(env: &Env, delegator: Address) -> Result<(), SwapTradeE
         .set(&DELEGATIONS_KEY, &delegations);
 
     env.events()
-        .publish((symbol_short!("del_revoke")), (delegator,));
+        .publish((symbol_short!("del_revk"),), (delegator,));
 
     Ok(())
 }

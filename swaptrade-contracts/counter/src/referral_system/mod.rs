@@ -95,7 +95,7 @@ pub fn register_referral(
 
     // Emit event
     env.events().publish(
-        symbol_short!("referral_registered"),
+        (symbol_short!("ref_reg"),),
         (referrer, referred, ReferralLevel::Direct),
     );
 
@@ -275,7 +275,7 @@ pub fn withdraw_commission(env: &Env, user: Address) -> i128 {
 
     // Emit event
     env.events()
-        .publish(symbol_short!("commission_withdrawn"), (user, balance));
+        .publish((symbol_short!("comm_wd"),), (user, balance));
 
     balance
 }

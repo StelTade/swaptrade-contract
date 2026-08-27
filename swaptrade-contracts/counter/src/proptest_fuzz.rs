@@ -17,17 +17,17 @@ use crate::portfolio::{Asset, LPPosition, Portfolio};
 
 /// Strategy for generating valid swap amounts (positive i128 within bounds)
 fn arb_swap_amount() -> impl Strategy<Value = i128> {
-    (1_i128..1_000_000_000_000_i128)
+    1_i128..1_000_000_000_000_i128
 }
 
 /// Strategy for generating fee basis points (0-100 bps)
 fn arb_fee_bps() -> impl Strategy<Value = i128> {
-    (0_i128..=100_i128)
+    0_i128..=100_i128
 }
 
 /// Strategy for generating slippage basis points (0-10000 bps = 0-100%)
 fn arb_slippage_bps() -> impl Strategy<Value = u128> {
-    (0_u128..=10_000_u128)
+    0_u128..=10_000_u128
 }
 
 /// Strategy for generating pool reserves

@@ -1,4 +1,4 @@
-use soroban_sdk::{contracttype, Address, Env, String, symbol_short};
+use soroban_sdk::{contracttype, symbol_short, Address, Env, String};
 
 // --- Data Structures ---
 
@@ -26,10 +26,7 @@ pub fn award_badge(env: &Env, user: Address, badge: Badge) {
 
     env.storage().persistent().set(&key, &true);
 
-    env.events().publish(
-        (symbol_short!("reward"), user),
-        badge
-    );
+    env.events().publish((symbol_short!("reward"), user), badge);
 }
 
 /// Helper function to verify if a user has a specific badge

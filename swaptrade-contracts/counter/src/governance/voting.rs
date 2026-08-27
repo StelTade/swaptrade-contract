@@ -94,7 +94,10 @@ impl Proposal {
             return Err("Proposal has already been executed".to_string());
         }
         if self.status != ProposalStatus::Passed {
-            return Err(format!("Proposal cannot be executed, current status: {:?}", self.status));
+            return Err(format!(
+                "Proposal cannot be executed, current status: {:?}",
+                self.status
+            ));
         }
         self.status = ProposalStatus::Executed;
         Ok(())
@@ -129,19 +132,34 @@ impl GovernanceVoting {
         id
     }
 
-    pub fn vote(&mut self, proposal_id: u64, voter: &str, in_favor: bool, now: u64) -> Result<(), String> {
-        let proposal = self.proposals.get_mut(&proposal_id).ok_or("proposal not found")?;
+    pub fn vote(
+        &mut self,
+        proposal_id: u64,
+        voter: &str,
+        in_favor: bool,
+        now: u64,
+    ) -> Result<(), String> {
+        let proposal = self
+            .proposals
+            .get_mut(&proposal_id)
+            .ok_or("proposal not found")?;
         proposal.cast_vote(voter, in_favor, now)
     }
 
     pub fn finalize(&mut self, proposal_id: u64, now: u64) -> Result<ProposalStatus, String> {
-        let proposal = self.proposals.get_mut(&proposal_id).ok_or("proposal not found")?;
+        let proposal = self
+            .proposals
+            .get_mut(&proposal_id)
+            .ok_or("proposal not found")?;
         proposal.finalize(now);
         Ok(proposal.status.clone())
     }
 
     pub fn execute_proposal(&mut self, proposal_id: u64) -> Result<(), String> {
-        let proposal = self.proposals.get_mut(&proposal_id).ok_or("proposal not found")?;
+        let proposal = self
+            .proposals
+            .get_mut(&proposal_id)
+            .ok_or("proposal not found")?;
         proposal.execute()
     }
 
@@ -157,7 +175,13 @@ mod tests {
     #[test]
     fn test_vote_and_pass() {
         let mut gov = GovernanceVoting::new();
-        let id = gov.create_proposal("Enable fee discount".to_string(), "alice".to_string(), 2, 3600, 0);
+        let id = gov.create_proposal(
+            "Enable fee discount".to_string(),
+            "alice".to_string(),
+            2,
+            3600,
+            0,
+        );
         gov.vote(id, "alice", true, 100).unwrap();
         gov.vote(id, "bob", true, 200).unwrap();
         let status = gov.finalize(id, 300).unwrap();

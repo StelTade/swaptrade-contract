@@ -33,8 +33,8 @@ pub enum SwapTradeError {
     QuorumNotReached = 97,
     ProposalFailed = 98,
     ProposalCanceled = 99,
-    VotingEnded = 100,
-    NotInCouncil = 101,
+    VotingEnded = 110,
+    NotInCouncil = 111,
 
     // ── Trading / contract state ────────────────────────────────────────────
     TradingPaused = 10,

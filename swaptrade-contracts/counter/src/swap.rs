@@ -1,9 +1,11 @@
 use crate::emergency;
 use crate::errors::SwapTradeError;
+use crate::private_transaction::{
+    private_swap::perform_private_swap as private_swap_exec, PrivateTransactionProcessor,
+};
 use crate::risk_management::volume_circuit_breaker;
-use crate::private_transaction::{PrivateTransactionProcessor, private_swap::perform_private_swap as private_swap_exec};
-use crate::zkp_verification::ProofVerifier;
 use crate::zkp_types::{CircuitParameters, PrivateTransaction};
+use crate::zkp_verification::ProofVerifier;
 use soroban_sdk::{Address, Bytes, Env, Symbol};
 
 // Import Portfolio type
@@ -63,15 +65,15 @@ pub fn perform_private_swap(
     if emergency::is_frozen(env, user.clone()) {
         return Err(SwapTradeError::UserFrozen);
     }
-    
+
     // Require authorization from the sender
     user.require_auth();
-    
+
     // Initialize the ZKP verifier and processor with default circuit parameters
     let params = CircuitParameters::default();
     let verifier = ProofVerifier::new(params);
-    let processor = PrivateTransactionProcessor::new(verifier);
-    
+    let processor = PrivateTransactionProcessor::new();
+
     // Execute the private swap using the implementation from private_transaction module
     private_swap_exec(env, &processor, user, from, to, private_tx)
         .map_err(|_| SwapTradeError::InvalidPrivateTransaction)

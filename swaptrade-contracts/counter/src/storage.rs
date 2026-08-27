@@ -8,8 +8,8 @@ pub const DEFAULT_TREASURY_KEY: Symbol = symbol_short!("treasury");
 pub const MULTI_SIG_CONFIG_KEY: Symbol = symbol_short!("ms_config");
 
 pub const PROPOSALS_KEY: Symbol = symbol_short!("proposals");
-pub const PROPOSAL_STATE_KEY: Symbol = symbol_short!("prop_state");
-pub const TOTAL_SUPPLY_KEY: Symbol = symbol_short!("tot_supply");
+pub const PROPOSAL_STATE_KEY: Symbol = symbol_short!("p_state");
+pub const TOTAL_SUPPLY_KEY: Symbol = symbol_short!("t_supply");
 pub const BALANCES_KEY: Symbol = symbol_short!("balances");
 pub const GOV_COUNCIL_KEY: Symbol = symbol_short!("gov_cncl");
 

@@ -1,3 +1,12 @@
+#![allow(clippy::all)]
+#![allow(
+    unused_imports,
+    unused_variables,
+    dead_code,
+    deprecated,
+    unused_doc_comments,
+    unused_mut
+)]
 /// Performance benchmarks for dynamic fee adjustment system
 /// Measures: latency, throughput, memory usage, and impact on trading operations
 

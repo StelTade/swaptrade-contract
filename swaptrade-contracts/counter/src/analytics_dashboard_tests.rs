@@ -1,9 +1,9 @@
 #![cfg(test)]
 
 use super::*;
+use crate::portfolio::TradeRecord;
 use soroban_sdk::testutils::Address as _;
 use soroban_sdk::{symbol_short, Env};
-use crate::portfolio::TradeRecord;
 
 #[test]
 fn test_record_trade_with_pnl() {

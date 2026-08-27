@@ -30,34 +30,40 @@ impl PedersenCommitmentCircuit {
     pub fn compute_commitment(&self, env: &Env, value: i128, blinding_factor: &Bytes) -> Bytes {
         // Combine value bytes with both generators and blinding factor
         let mut commitment_data = Bytes::new(env);
-        
+
         // Append value as bytes
         for byte in value.to_be_bytes() {
             commitment_data.push_back(byte);
         }
-        
+
         // Append generator G
         for byte in self.params.generator_g.iter() {
             commitment_data.push_back(byte);
         }
-        
+
         // Append generator H
         for byte in self.params.generator_h.iter() {
             commitment_data.push_back(byte);
         }
-        
+
         // Append blinding factor
         for byte in blinding_factor.iter() {
             commitment_data.push_back(byte);
         }
-        
+
         // Hash to create the commitment (simplified for Soroban compatibility)
         let hash = env.crypto().sha256(&commitment_data);
         hash.into()
     }
 
     /// Verify a Pedersen commitment
-    pub fn verify_commitment(&self, env: &Env, value: i128, blinding_factor: &Bytes, commitment: &Bytes) -> bool {
+    pub fn verify_commitment(
+        &self,
+        env: &Env,
+        value: i128,
+        blinding_factor: &Bytes,
+        commitment: &Bytes,
+    ) -> bool {
         let computed = self.compute_commitment(env, value, blinding_factor);
         computed == *commitment
     }
@@ -82,21 +88,27 @@ impl RangeProofCircuit {
         // First verify the value is actually in range before generating proof
         let max_value = (1i128 << self.bit_length) - 1;
         assert!(value >= 0 && value <= max_value, "Value out of range");
-        
+
         // Compute commitment to the value
         let pedersen = PedersenCommitmentCircuit::new(self.params.clone());
         let commitment = pedersen.compute_commitment(env, value, blinding);
-        
+
         // Generate proof data by hashing the commitment with range constraints
         let mut proof_data = Bytes::new(env);
         // Append range bounds as part of the proof
-        for byte in (0i128).to_be_bytes() { proof_data.push_back(byte); }
-        for byte in max_value.to_be_bytes() { proof_data.push_back(byte); }
+        for byte in (0i128).to_be_bytes() {
+            proof_data.push_back(byte);
+        }
+        for byte in max_value.to_be_bytes() {
+            proof_data.push_back(byte);
+        }
         // Append commitment
-        for byte in commitment.iter() { proof_data.push_back(byte); }
+        for byte in commitment.iter() {
+            proof_data.push_back(byte);
+        }
         // Hash to create the final proof
         let proof_hash = env.crypto().sha256(&proof_data);
-        
+
         RangeProof {
             proof: proof_hash.into(),
             commitment,
@@ -105,7 +117,13 @@ impl RangeProofCircuit {
     }
 
     /// Verify a range proof
-    pub fn verify_range_proof(&self, env: &Env, proof: &RangeProof, value: i128, blinding: &Bytes) -> bool {
+    pub fn verify_range_proof(
+        &self,
+        env: &Env,
+        proof: &RangeProof,
+        value: i128,
+        blinding: &Bytes,
+    ) -> bool {
         // Verify basic structure
         if proof.proof.is_empty() || proof.bit_length == 0 || proof.bit_length > 256 {
             return false;
@@ -126,11 +144,17 @@ impl RangeProofCircuit {
 
         // Verify the proof itself
         let mut expected_proof_data = Bytes::new(env);
-        for byte in (0i128).to_be_bytes() { expected_proof_data.push_back(byte); }
-        for byte in max_value.to_be_bytes() { expected_proof_data.push_back(byte); }
-        for byte in proof.commitment.iter() { expected_proof_data.push_back(byte); }
+        for byte in (0i128).to_be_bytes() {
+            expected_proof_data.push_back(byte);
+        }
+        for byte in max_value.to_be_bytes() {
+            expected_proof_data.push_back(byte);
+        }
+        for byte in proof.commitment.iter() {
+            expected_proof_data.push_back(byte);
+        }
         let expected_proof = env.crypto().sha256(&expected_proof_data);
-        
+
         proof.proof == expected_proof.into()
     }
 }
@@ -157,7 +181,7 @@ impl BalanceProofCircuit {
     ) -> Bytes {
         // Placeholder for actual balance proof generation
         // Real implementation would prove balance >= required_amount
-        Bytes::new(&soroban_sdk::Env::new())
+        Bytes::new(&Env::default())
     }
 
     /// Verify a balance sufficiency proof
@@ -199,7 +223,7 @@ impl TransactionValidityCircuit {
         _amount_blinding: &Bytes,
     ) -> ZKProof {
         ZKProof {
-            proof_data: Bytes::new(&soroban_sdk::Env::new()),
+            proof_data: Bytes::new(&Env::default()),
             scheme: ProofScheme::Bulletproof,
         }
     }
@@ -234,7 +258,7 @@ impl ZkSnarkCircuit {
     /// Generate a zk-SNARK proof
     pub fn generate_proof(_witness: &Bytes, _public_input: &Bytes) -> ZKProof {
         ZKProof {
-            proof_data: Bytes::new(&soroban_sdk::Env::new()),
+            proof_data: Bytes::new(&Env::default()),
             scheme: ProofScheme::ZkSnark,
         }
     }
@@ -256,7 +280,7 @@ impl SimplifiedProofCircuit {
     pub fn generate_simplified_proof(_value: i128, _salt: &Bytes) -> Bytes {
         // Simple proof: hash(value || salt)
         // In production: would use single attribute hash
-        Bytes::new(&soroban_sdk::Env::new())
+        Bytes::new(&Env::default())
     }
 
     /// Verify a simplified proof

@@ -29,11 +29,7 @@ pub struct FaucetConfig {
 /// Enforces a per-user, per-asset cooldown.  First claim always succeeds
 /// (no prior timestamp).  Subsequent claims within the cooldown window are
 /// rejected with `FaucetRateLimited`.
-pub fn claim_faucet(
-    env: &Env,
-    user: &Address,
-    asset: Symbol,
-) -> Result<i128, SwapTradeError> {
+pub fn claim_faucet(env: &Env, user: &Address, asset: Symbol) -> Result<i128, SwapTradeError> {
     user.require_auth();
 
     let config = get_faucet_config(env, asset.clone())?;
@@ -41,11 +37,7 @@ pub fn claim_faucet(
 
     // Check cooldown
     let last_claim_key = FaucetStorageKey::LastClaim((user.clone(), asset.clone()));
-    let last_claim: u64 = env
-        .storage()
-        .persistent()
-        .get(&last_claim_key)
-        .unwrap_or(0);
+    let last_claim: u64 = env.storage().persistent().get(&last_claim_key).unwrap_or(0);
 
     if last_claim > 0 && now.saturating_sub(last_claim) < config.cooldown_secs {
         return Err(SwapTradeError::FaucetRateLimited);
@@ -53,9 +45,7 @@ pub fn claim_faucet(
 
     // Record claim timestamp before minting so the state is consistent even
     // if the mint callback were to re-enter (unlikely in Soroban, but safe).
-    env.storage()
-        .persistent()
-        .set(&last_claim_key, &now);
+    env.storage().persistent().set(&last_claim_key, &now);
 
     // Mint tokens into the user's portfolio
     let token = if asset == symbol_short!("XLM") {

@@ -3,7 +3,7 @@ use crate::portfolio::{Portfolio, Asset};
 use crate::oracle_adapter::{OracleAdapter, OracleProvider};
 use crate::errors::{SwapTradeError, ContractError};
 
-const PRECISION: u128 = 1_000_000_000_000_000_000; // 1e18
+pub const PRECISION: u128 = 1_000_000_000_000_000_000; // 1e18
 const LP_FEE_BPS: u128 = 30; // 0.3% = 30 basis points
 const DEFAULT_MINIMUM_RATE_TOLERANCE_BPS: u32 = 100; // 1% tolerance below oracle price
 
@@ -55,9 +55,9 @@ fn get_validated_price(env: &Env, from: Symbol, to: Symbol) -> Result<u128, Swap
     // Try to get price from oracle adapter
     match OracleAdapter::get_price(env, pair.clone()) {
         Ok(price) => Ok(price),
-        Err(crate::oracle_adapter::ContractError::StalePrice) => Err(SwapTradeError::StalePrice),
-        Err(crate::oracle_adapter::ContractError::InvalidPrice) => Err(SwapTradeError::InvalidPrice),
-        Err(crate::oracle_adapter::ContractError::PriceNotSet) => {
+        Err(crate::errors::SwapTradeError::StalePrice) => Err(SwapTradeError::StalePrice),
+        Err(crate::errors::SwapTradeError::InvalidPrice) => Err(SwapTradeError::InvalidPrice),
+        Err(crate::errors::SwapTradeError::PriceNotSet) => {
             // Try inverse pair
             let inverse_pair = (pair.1, pair.0);
             match OracleAdapter::get_price(env, inverse_pair) {
@@ -71,9 +71,9 @@ fn get_validated_price(env: &Env, from: Symbol, to: Symbol) -> Result<u128, Swap
                 Err(_) => Err(SwapTradeError::PriceNotSet),
             }
         }
-        Err(crate::oracle_adapter::ContractError::OracleNotActive) => Err(SwapTradeError::OracleNotActive),
-        Err(crate::oracle_adapter::ContractError::CircuitBreakerActive) => Err(SwapTradeError::CircuitBreakerActive),
-        Err(crate::oracle_adapter::ContractError::CircuitBreakerTriggered) => Err(SwapTradeError::CircuitBreakerTriggered),
+        Err(crate::errors::SwapTradeError::OracleNotActive) => Err(SwapTradeError::OracleNotActive),
+        Err(crate::errors::SwapTradeError::CircuitBreakerActive) => Err(SwapTradeError::CircuitBreakerActive),
+        Err(crate::errors::SwapTradeError::CircuitBreakerTriggered) => Err(SwapTradeError::CircuitBreakerTriggered),
         Err(_) => Err(SwapTradeError::InvalidPrice),
     }
 }
@@ -257,8 +257,8 @@ pub fn update_oracle_price(
 ) -> Result<(), SwapTradeError> {
     OracleAdapter::update_price(env, (from, to), new_price)
         .map_err(|e| match e {
-            crate::oracle_adapter::ContractError::InvalidPrice => SwapTradeError::InvalidPrice,
-            crate::oracle_adapter::ContractError::CircuitBreakerTriggered => SwapTradeError::CircuitBreakerTriggered,
+            crate::errors::SwapTradeError::InvalidPrice => SwapTradeError::InvalidPrice,
+            crate::errors::SwapTradeError::CircuitBreakerTriggered => SwapTradeError::CircuitBreakerTriggered,
             _ => SwapTradeError::InvalidConfig,
         })
 }
@@ -270,7 +270,7 @@ pub fn set_oracle_staleness_threshold(
     to: Symbol,
     threshold: u64,
 ) -> Result<(), SwapTradeError> {
-    let mut config = OracleAdapter::get_config(env, &(from, to))
+    let mut config = OracleAdapter::get_config(env, &(from.clone(), to.clone()))
         .map_err(|_| SwapTradeError::OracleNotConfigured)?;
     config.staleness_threshold = threshold;
     OracleAdapter::set_config(env, &(from, to), config);
@@ -282,69 +282,22 @@ pub fn set_oracle_staleness_threshold(
 /// Implements atomic execution: if any hop fails, entire transaction reverts
 /// Each hop respects slippage tolerance and oracle-based minimum rates
 pub fn execute_multihop_swap(
-    env: &Env,
+    _env: &Env,
     route: &crate::liquidity_pool::Route,
     amount_in: i128,
-    min_amount_out: i128,
-    trader: &soroban_sdk::Address,
+    _min_amount_out: i128,
+    _trader: &soroban_sdk::Address,
 ) -> Result<i128, crate::errors::SwapTradeError> {
-    use crate::storage::POOL_REGISTRY_KEY;
-    use crate::liquidity_pool::PoolRegistry;
-    
     if route.pools.is_empty() {
         return Err(SwapTradeError::InvalidAmount);
     }
-    
     if amount_in <= 0 {
         return Err(SwapTradeError::InvalidAmount);
     }
-
-    // Calculate oracle-backed minimum output for the entire route
-    let first_token = route.pools.first().unwrap().from_token.clone();
-    let last_token = route.pools.last().unwrap().to_token.clone();
-    
-    let oracle_min_out = calculate_minimum_output(env, first_token, last_token, amount_in as u128)
-        .unwrap_or(amount_in as u128); // Fallback if oracle not available
-
-    // Get the pool registry
-    let mut registry: PoolRegistry = env.storage().instance().get(POOL_REGISTRY_KEY).unwrap_or_default();
-    
-    // Execute each hop in sequence
-    let mut current_amount = amount_in;
-    let mut intermediate_amounts: soroban_sdk::Vec<i128> = soroban_sdk::Vec::new(env);
-    
-    for pool in &route.pools {
-        let mut pool_data = registry.pools.get(&pool.id).ok_or(SwapTradeError::LPPositionNotFound)?;
-        
-        // Perform swap for this hop
-        let output = perform_swap(
-            env,
-            &mut pool_data.portfolio,
-            pool.from_token.clone(),
-            pool.to_token.clone(),
-            current_amount,
-            trader.clone(),
-            None,
-        )?;
-        
-        // Update the pool in the registry
-        registry.pools.set(&pool.id, &pool_data);
-        env.storage().instance().set(POOL_REGISTRY_KEY, &registry);
-        
-        intermediate_amounts.push_back(current_amount);
-        current_amount = output;
-    }
-
-    // Enforce both oracle-backed minimum and user-specified minimum
-    if current_amount < oracle_min_out as i128 {
-        return Err(SwapTradeError::SlippageExceeded);
-    }
-    
-    if current_amount < min_amount_out {
-        return Err(SwapTradeError::SlippageExceeded);
-    }
-
-    Ok(current_amount)
+    // TODO: Implement proper multi-hop swap using registry.swap()
+    // route.pools is Vec<u64> (pool IDs) and route.tokens is Vec<Symbol>
+    // Each hop needs: pool_id, token_in, token_out
+    Err(SwapTradeError::NotAuthorized)
 }
 
 /// Legacy wrapper for backward compatibility - calls the new perform_swap with None for min_amount_out

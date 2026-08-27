@@ -4,6 +4,10 @@ members = [
   "swaptrade-contracts/counter",
   "swaptrade-contracts/soroban-ping",
   "swaptrade-contracts/atomic-swap",
+  "swaptrade-contracts/governance",
+  "swaptrade-contracts/escrow-dispute",
+  "swaptrade-contracts/trade-engine",
+  "swaptrade-contracts/gas-benchmarks",
 ]
 
 [workspace.dependencies]
