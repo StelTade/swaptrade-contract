@@ -1,0 +1,26 @@
+[package]
+name = "portfolio-analytics"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+crate-type = ["lib", "cdylib"]
+doctest = false
+
+[[test]]
+name = "portfolio_tests"
+path = "tests/portfolio_tests.rs"
+
+[[test]]
+name = "analytics_benchmark_tests"
+path = "tests/analytics_benchmark_tests.rs"
+
+[dependencies]
+soroban-sdk = { workspace = true }
+
+[dev-dependencies]
+soroban-sdk = { workspace = true, features = ["testutils"] }
+
+[features]
+logging = []
