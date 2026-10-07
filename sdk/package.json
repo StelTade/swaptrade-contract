@@ -8,7 +8,7 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsc",
+    "build": "node init && tsc",
     "watch": "tsc --watch",
     "prepublishOnly": "npm run build"
   },
